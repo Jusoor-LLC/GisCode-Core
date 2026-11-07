@@ -2000,7 +2000,7 @@ class MainWindow:
 
     def _run_task(self, message, attachments, epoch: int) -> None:
         if self._gisai_engine is None:
-            self._run_core_task(message, epoch)
+            self._run_core_task(message, epoch, attachments)
             return
         try:
             task = self._gisai_engine.receive(
@@ -2016,7 +2016,7 @@ class MainWindow:
         except Exception as exc:
             self._worker_results[epoch] = (None, exc, epoch, None)
 
-    def _run_core_task(self, message, epoch: int) -> None:
+    def _run_core_task(self, message, epoch: int, attachments=None) -> None:
         """Execute a supported deterministic task without any GisAI engine.
 
         The dispatcher owns parsing, execution, independent read-back
@@ -2042,12 +2042,67 @@ class MainWindow:
                 # Core edits ask the same person through the same
                 # thread-safe queue the engine-backed path uses.
                 approve=self._approve_edit,
+                model_router=self._selected_model_router(
+                    "vision" if self._has_image_attachment(attachments) else "chat"
+                ),
+                attachments=attachments,
             )
         except Exception as exc:  # never let a dispatcher bug look like success
             self._worker_results[epoch] = (None, exc, epoch, task)
             return
         task.status = str(result.get("status") or "failed")
         self._worker_results[epoch] = (result, None, epoch, task)
+
+    def _selected_model_router(self, purpose: str = "coding"):
+        """The router over the profile selected in Model Manager.
+
+        Read lazily and cached per purpose: switching a profile in Model
+        Manager must take effect on the next request, without restarting the
+        application and without a second registry or profile store.
+        """
+        cached = getattr(self, "_model_router_cache", None)
+        if cached is not None and getattr(cached, "purpose", None) == purpose:
+            return cached
+
+        window = self
+
+        class _Source:
+            def get(self, key, default=None):
+                return window._settings_get(key, default)
+
+            def set(self, key, value) -> None:
+                if not window._settings_set(key, value):
+                    raise RuntimeError("settings are not writable")
+
+            def save(self) -> None:
+                # ``_settings_set`` already persisted the value; nothing is
+                # buffered. The provider layer requires the method to exist, so
+                # the adapter must offer it or it is not a settings source.
+                return None
+
+        from giscode.inference.router import ModelRouter
+
+        builtin = getattr(self, "_inference", None) or getattr(self, "inference", None)
+        try:
+            router = ModelRouter(builtin=builtin, settings=_Source(), purpose=purpose)
+        except Exception:
+            return None
+        self._model_router_cache = router
+        return router
+
+    @staticmethod
+    def _has_image_attachment(attachments) -> bool:
+        """True when at least one attachment is an image the router can send."""
+        try:
+            from giscode.vision.images import SUPPORTED_IMAGE_SUFFIXES
+        except Exception:  # pragma: no cover - vision support is always present
+            return False
+        for item in attachments or []:
+            path = str(getattr(item, "path", "") or "")
+            mime = str(getattr(item, "mime_type", "") or "").lower()
+            if mime.startswith("image/") or Path(path).suffix.lower() in SUPPORTED_IMAGE_SUFFIXES:
+                return True
+        return False
 
     def _remaining_task_budget(self) -> Optional[float]:
         """Time left on the task clock, or None when no budget was started."""
@@ -3308,6 +3363,27 @@ class MainWindow:
         self.unload_model_btn = ttk.Button(buttons, text="Unload current model", command=self._unload_current_model)
         self.unload_model_btn.pack(side=tk.LEFT)
         ttk.Label(frame, text="Model loading remains owned by ModelManager and the existing deferred startup worker.", foreground="gray").pack(anchor=tk.W)
+        # Providers, profiles and the two tests are additive: the GGUF path above
+        # keeps working exactly as it did, and this section adds other local
+        # runtimes beside it. Kept in its own module so this file stays readable.
+        from giscode.gui.provider_panel import build_provider_panel
+
+        # A broken provider panel must not take the window down with it: the
+        # GGUF path above has to keep working. The failure is shown, not hidden.
+        try:
+            self._provider_panel = build_provider_panel(frame, self)
+        except Exception as _provider_exc:  # pragma: no cover - defensive
+            self._provider_panel = None
+            ttk.Label(
+                frame,
+                text=(
+                    "Provider panel unavailable: "
+                    f"{type(_provider_exc).__name__}: {_provider_exc}"
+                ),
+                foreground="red",
+                wraplength=900,
+                justify=tk.LEFT,
+            ).pack(anchor=tk.W, pady=(8, 0))
 
     def _create_project_doctor_tab(self) -> None:
         # Pro-only: the builder lives in giscode.gui.pro_tabs, which the

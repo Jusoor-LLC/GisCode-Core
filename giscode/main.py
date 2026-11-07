@@ -256,7 +256,14 @@ def bootstrap() -> tuple[SettingsManager, Workspace, TaskManager, InferenceAPI, 
     )
     research_service = ResearchService(config=research_config, knowledge_service=knowledge_service)
 
-    coding_agent = CodingAgentLoop(workspace, inference, task_manager, knowledge_service=knowledge_service, routing_service=routing_service, ocr_service=ocr_service, self_improvement_service=self_improvement_service, research_service=research_service, settings=settings)
+    # The active coding profile may point at Ollama, LM Studio or another local
+    # endpoint. The router keeps the built-in InferenceAPI for llama.cpp targets
+    # and gives the planner and coding loop the provider-backed backend
+    # otherwise, so the approval gate, executor and verifier below are unchanged.
+    from giscode.inference.router import ModelRouter
+
+    routed_inference = ModelRouter(builtin=inference, settings=settings, purpose="coding")
+    coding_agent = CodingAgentLoop(workspace, routed_inference, task_manager, knowledge_service=knowledge_service, routing_service=routing_service, ocr_service=ocr_service, self_improvement_service=self_improvement_service, research_service=research_service, settings=settings)
 
     try:
         from giscode.projects.context import ProjectContextStore

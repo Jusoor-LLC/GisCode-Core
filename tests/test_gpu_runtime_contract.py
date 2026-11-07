@@ -97,6 +97,7 @@ def test_model_search_dirs_keep_lmstudio_weights_when_the_home_is_redirected(
     assert str(weights) in dirs
 
 
+@pytest.mark.skipif(os.name != "nt", reason="asserts Windows profile search paths")
 def test_model_search_dirs_are_unchanged_when_the_home_is_real(monkeypatch, tmp_path):
     profile = tmp_path / "profile"
     (profile / "AppData" / "Local").mkdir(parents=True)

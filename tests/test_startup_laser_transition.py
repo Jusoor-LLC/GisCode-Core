@@ -41,7 +41,12 @@ from giscode.inference.runtime import SubprocessLlamaCppRuntime
 # ------------------------------------------------------------------ A. splash
 
 
-def test_laser_splash_beam_sweeps_then_morphs_and_closes(tk_root):
+def test_laser_splash_beam_sweeps_then_morphs_and_closes(tk_root, monkeypatch):
+    from giscode.gui.launch_sequence import GisLaunchSequence
+
+    # This test covers the animated path even on a runner where Windows has
+    # disabled client-area animations; reduced motion is a separate path.
+    monkeypatch.setattr(GisLaunchSequence, "_animations_disabled", staticmethod(lambda: False))
     transitions = []
     splash = show_laser_splash(tk_root, on_transition=lambda: transitions.append(1))
     assert splash._photo is not None, "laser splash must load the Gis artwork"

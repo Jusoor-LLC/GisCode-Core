@@ -1,0 +1,75 @@
+name: Bug report
+description: Report a reproducible GisCode Core problem
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include API keys, tokens, private
+        project contents, personal paths, or other sensitive data. Security
+        issues must follow SECURITY.md instead of this public form.
+  - type: input
+    id: version
+    attributes:
+      label: GisCode version or commit
+      description: v0.1.0, a commit hash, or "source checkout"
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Windows and Python version
+      placeholder: Windows 11 24H2, Python 3.13.15
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Git checkout and virtual environment
+        - Git checkout with system Python
+        - Another method (explain below)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Give the smallest sequence that reliably shows the problem.
+      placeholder: |
+        1. Start GisCode with ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Include the exact error/refusal text, not only a summary.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant non-sensitive log excerpt
+      description: Logs are under the configured GISCODE_HOME, normally %USERPROFILE%\.giscode\logs.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed secrets, tokens, private project data and personal paths.
+          required: true
+        - label: I checked the troubleshooting guide and the known limitations.
+          required: true
