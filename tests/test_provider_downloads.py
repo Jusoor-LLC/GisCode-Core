@@ -16,6 +16,7 @@ from giscode.providers.downloads import (
     CANCELLED,
     DONE,
     PAUSED,
+    RUNNING,
     DownloadError,
     DownloadManager,
 )
@@ -104,6 +105,35 @@ def test_pause_keeps_partial_file_and_resume_uses_range(server, tmp_path):
     manager.resume(download.id)
     assert _wait(lambda: manager.get(download.id).status == DONE)
     assert (tmp_path / "resume.gguf").read_bytes() == PAYLOAD
+
+
+def test_resume_during_the_pause_window_does_not_start_a_second_worker(server, tmp_path):
+    """Resuming while the paused worker is still in read() must not double up.
+
+    pause() marks the entry at once, but the worker only notices after its
+    current read() returns. resume() used to clear the flags and launch a second
+    worker in that window, leaving two writers on one .part file and an entry
+    that could stay PAUSED instead of reaching DONE (seen as an intermittent
+    failure on the Ubuntu runner). The running worker is handed the transfer
+    instead.
+    """
+    gate = threading.Event()
+    Handler.gate = gate
+    manager = DownloadManager(tmp_path, chunk_size=64 * 1024)
+    download = manager.start(_url(server), "handoff.gguf")
+    assert _wait(lambda: manager.get(download.id).status == RUNNING)
+    first = manager._threads[download.id]
+
+    manager.pause(download.id)
+    manager.resume(download.id)  # the worker is still blocked inside read()
+    assert manager._threads[download.id] is first  # no second worker launched
+    assert first.is_alive()
+
+    gate.set()
+    Handler.gate = None
+
+    assert _wait(lambda: manager.get(download.id).status == DONE)
+    assert (tmp_path / "handoff.gguf").read_bytes() == PAYLOAD
 
 
 def test_resume_from_existing_partial_sends_range_header(server, tmp_path):

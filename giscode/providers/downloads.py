@@ -95,6 +95,7 @@ class DownloadManager:
         self._threads: dict[str, threading.Thread] = {}
         self._pause_flags: dict[str, threading.Event] = {}
         self._cancel_flags: dict[str, threading.Event] = {}
+        self._pending_resume: dict[str, bool] = {}
         self._lock = threading.RLock()
 
     # -- public API --------------------------------------------------------
@@ -142,18 +143,31 @@ class DownloadManager:
         self._notify(download)
 
     def resume(self, download_id: str) -> None:
+        launch = False
         with self._lock:
             download = self._items.get(download_id)
             if download is None:
                 raise KeyError(download_id)
             if download.status not in (PAUSED, FAILED, CANCELLED):
                 return
-            self._pause_flags[download_id].clear()
-            self._cancel_flags[download_id].clear()
             download.status = QUEUED
             download.error = ""
+            thread = self._threads.get(download_id)
+            if thread is not None and thread.is_alive():
+                # The paused worker is still inside read(): it has not seen the
+                # pause yet. Clearing the flag and launching a second worker
+                # would put two writers on the same .part file, so mark the
+                # resume as pending and let that worker restart the transfer
+                # itself once its file handle is closed.
+                self._pending_resume[download_id] = True
+                self._pause_flags[download_id].set()
+            else:
+                self._pause_flags[download_id].clear()
+                self._cancel_flags[download_id].clear()
+                launch = True
         self._notify(download)
-        self._launch(download_id)
+        if launch:
+            self._launch(download_id)
 
     def cancel(self, download_id: str) -> None:
         with self._lock:
@@ -162,6 +176,7 @@ class DownloadManager:
                 raise KeyError(download_id)
             self._cancel_flags[download_id].set()
             self._pause_flags[download_id].clear()
+            self._pending_resume.pop(download_id, None)
             download.status = CANCELLED
             download.finished_at = time.time()
         self._notify(download)
@@ -184,6 +199,7 @@ class DownloadManager:
             download = self._items.pop(download_id, None)
             self._pause_flags.pop(download_id, None)
             self._cancel_flags.pop(download_id, None)
+            self._pending_resume.pop(download_id, None)
         if download is not None:
             self._notify(download)
 
@@ -236,6 +252,15 @@ class DownloadManager:
             daemon=True,
         )
         with self._lock:
+            previous = self._threads.get(download_id)
+            if (
+                previous is not None
+                and previous is not threading.current_thread()
+                and previous.is_alive()
+            ):
+                # One worker per download, always: resume() hands the transfer to
+                # the running worker rather than starting a second writer.
+                return
             self._threads[download_id] = thread
         thread.start()
 
@@ -250,6 +275,26 @@ class DownloadManager:
     def _target(self, download: Download) -> Path:
         return self._dir / download.filename
 
+    def _stop_for_pause(self, download_id: str, download: Download) -> None:
+        """Park this worker, or hand the transfer to a fresh one if resume() waited.
+
+        Called after the file handle is closed, so a handoff never overlaps two
+        writers. The status is written under the lock and only while it still
+        belongs to this worker, so a resume that already moved the entry on
+        cannot be overwritten with a stale PAUSED.
+        """
+        with self._lock:
+            handoff = self._pending_resume.pop(download_id, False)
+            if handoff:
+                self._pause_flags[download_id].clear()
+                self._cancel_flags[download_id].clear()
+                download.status = QUEUED
+            elif download.status == RUNNING:
+                download.status = PAUSED
+        self._notify(download)
+        if handoff:
+            self._launch(download_id)
+
     def _worker(self, download_id: str) -> None:
         with self._lock:
             download = self._items[download_id]
@@ -258,7 +303,11 @@ class DownloadManager:
 
         target = self._target(download)
         partial = Path(str(target) + ".part")
-        start_at = download.bytes_done if partial.exists() else 0
+        # The file on disk is the truth: bytes_done is updated just before the
+        # buffered write lands, and a Range header that disagrees with the bytes
+        # actually present would skip or duplicate data.
+        start_at = partial.stat().st_size if partial.exists() else 0
+        download.bytes_done = start_at
         # Create the partial file before the body arrives so a pause leaves a
         # real file on disk (and resume has something to continue from).
         if not partial.exists():
@@ -286,22 +335,28 @@ class DownloadManager:
                 if not download.bytes_total and total_header:
                     download.bytes_total = start_at + int(total_header)
                 mode = "ab" if start_at else "wb"
+                stopped = ""
                 with open(partial, mode) as handle:
                     while True:
                         if self._cancel_flags[download_id].is_set():
-                            download.status = CANCELLED
-                            self._notify(download)
-                            return
+                            stopped = CANCELLED
+                            break
                         if self._pause_flags[download_id].is_set():
-                            download.status = PAUSED
-                            self._notify(download)
-                            return
+                            stopped = PAUSED
+                            break
                         chunk = response.read(self._chunk)
                         if not chunk:
                             break
                         handle.write(chunk)
                         download.bytes_done += len(chunk)
                         self._notify(download)
+                if stopped == CANCELLED:
+                    download.status = CANCELLED
+                    self._notify(download)
+                    return
+                if stopped == PAUSED:
+                    self._stop_for_pause(download_id, download)
+                    return
         except urllib.error.HTTPError as exc:
             download.status = FAILED
             download.error = f"HTTP {exc.code} while downloading."
