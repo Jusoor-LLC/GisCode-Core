@@ -108,6 +108,7 @@ def test_parse_version(text, expected):
     assert bs.parse_version(text) == expected
 
 
+@pytest.mark.skipif(os.name != "nt", reason="asserts Windows build-folder names")
 def test_family_detection_is_case_insensitive():
     assert bs.family_of(r"C:\x\llama.cpp-win-x86_64-nvidia-cuda12-avx2-2.56.0\llama-server.exe") == "cuda12"
     assert bs.family_of(r"C:\x\llama.cpp-win-x86_64-nvidia-cuda-avx2-2.30.0\llama-server.exe") == "cuda"
@@ -354,6 +355,7 @@ def test_version_probe_is_cached_for_the_session(monkeypatch):
     assert len(calls) == 1
 
 
+@pytest.mark.skipif(os.name != "nt", reason="asserts Windows DLL PATH handling")
 def test_server_env_puts_sibling_vendor_dlls_on_path(tmp_path):
     paths = make_tree(tmp_path, CUDA12)
     vendor = tmp_path / "vendor" / "win-llama-cuda12-vendor-v2"

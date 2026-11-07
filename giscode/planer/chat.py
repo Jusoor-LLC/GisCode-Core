@@ -25,6 +25,7 @@ It deliberately does **not**:
 """
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -40,6 +41,17 @@ from giscode.storage.chat_store import (
 
 PLANER_CHAT_TITLE = "Planer"
 _VALID_ROLES = frozenset({"user", "assistant", "system"})
+
+# Serializes the "look for the chat, else create it" sequence below. Each
+# PlanerChatPersistence caches its own chat id and each caller may own a
+# separate ChatStore (and therefore a separate SQLite connection), so the
+# per-store lock cannot prevent two adapters from both reading "no chat yet"
+# and each inserting one. That produced two Planer chats for a single
+# project, and history loaded from only one of them (concurrent turn
+# recording silently lost the other thread's turns). Creation happens at
+# most once per project per session, so a single module-level lock costs
+# nothing measurable.
+_GET_OR_CREATE_LOCK = threading.Lock()
 
 
 def _utc_now_iso() -> str:
@@ -148,6 +160,16 @@ class PlanerChatPersistence:
             # and re-resolve.
             self._chat_id = None
 
+        with _GET_OR_CREATE_LOCK:
+            return self._resolve_or_create_chat()
+
+    def _resolve_or_create_chat(self) -> ChatRecord:
+        """List-then-create body of :meth:`get_or_create_chat`.
+
+        Callers must hold :data:`_GET_OR_CREATE_LOCK`; without it two
+        concurrent adapters can both observe "no chat yet" and each
+        create one.
+        """
         scope = self.scope
         scope_id = self.project_id
         try:

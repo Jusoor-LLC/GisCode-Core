@@ -108,6 +108,8 @@ def test_every_tab_stays_selectable_at_the_minimum_size(window, tk_root):
 
 
 def test_the_normal_layout_still_has_room_to_spare(window, tk_root):
+    if tk_root.winfo_screenwidth() < 1400 or tk_root.winfo_screenheight() < 900:
+        pytest.skip("the runner display cannot provide a 1400x900 window")
     _show(tk_root, 1400, 900)
     buttons = _buttons(tk_root)
     squeezed = [
