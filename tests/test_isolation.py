@@ -47,7 +47,8 @@ def test_profile_root_override():
         override = Path(tmpdir) / "custom_giscode"
         set_giscode_home(override)
         try:
-            assert profile_root() == override.parent, f"Expected {override.parent}, got {profile_root()}"
+            expected = override.parent.resolve()
+            assert profile_root() == expected, f"Expected {expected}, got {profile_root()}"
             print("OK test_profile_root_override")
         finally:
             if "GISCODE_HOME" in os.environ:
@@ -71,7 +72,7 @@ def test_knowledge_config_override_path():
         set_giscode_home(override)
         try:
             config = KnowledgeStoreConfig()
-            expected = override / "knowledge.db"
+            expected = override.resolve() / "knowledge.db"
             assert config.storage_path == expected, f"Expected {expected}, got {config.storage_path}"
             # Verify it uses the override, not the default ~/.giscode
             default_path = Path.home() / ".giscode" / "knowledge.db"
@@ -98,7 +99,7 @@ def test_knowledge_config_safety_check_override():
         set_giscode_home(override)
         try:
             config = KnowledgeStoreConfig(storage_path=str(override / "custom.db"))
-            assert config.storage_path == override / "custom.db"
+            assert config.storage_path == override.resolve() / "custom.db"
             print("OK test_knowledge_config_safety_check_override")
         finally:
             if "GISCODE_HOME" in os.environ:
