@@ -305,5 +305,73 @@ class ModelRouter:
         if callable(cancel):
             cancel()
 
+    # ------------------------------------------------------------- vision
+    def supports_vision(self, target: Optional[Target] = None) -> bool:
+        """True only when the provider itself reports this model reads images.
+
+        A built-in GGUF target answers False here: its images go through
+        :mod:`giscode.vision`, not through this router, and claiming otherwise
+        would send a picture to a text model.
+        """
+        target = target or self.active_target()
+        if target is None or not target.model or target.is_builtin:
+            return False
+        try:
+            return bool(getattr(self._backend_for(target), "supports_vision", False))
+        except Exception:
+            return False
+
+    def vision_target(self) -> tuple[Optional[Target], str]:
+        """The target that should answer an image request, and why it was chosen.
+
+        An explicit ``vision`` profile wins. Otherwise a ``chat`` profile whose
+        model the provider reports as vision-capable is used and labelled as
+        such. A text-only selection returns ``None`` - never a silent swap.
+        """
+        try:
+            profile = self._profiles.active_for("vision")
+        except Exception:
+            profile = None
+        if profile is not None:
+            target = Target(
+                kind=profile.provider or LLAMA_CPP,
+                model=profile.model or "",
+                provider_id=profile.provider or LLAMA_CPP,
+                profile_id=profile.id,
+                profile_label=profile.label,
+                purpose="vision",
+            )
+            if target.is_builtin or self.supports_vision(target):
+                return target, "vision profile"
+            return None, (
+                f"the vision profile {target.profile_label or target.profile_id!r} "
+                f"names {target.model!r}, which "
+                f"{target.provider_id or 'the provider'} does not report as "
+                "vision-capable."
+            )
+        chat = self.active_target("chat")
+        if self.supports_vision(chat):
+            return chat, "chat profile"
+        return None, (
+            "no vision-capable model is selected: "
+            f"{self.describe_active('chat') or 'no model'} is text-only."
+        )
+
+    def vision_candidates(self, limit: int = 5) -> list[str]:
+        """Installed models the providers report as vision-capable, for a hint."""
+        found: list[str] = []
+        try:
+            models = self._registry.all_models()
+        except Exception:
+            return found
+        for model in models:
+            if "vision" in {str(c).lower() for c in getattr(model, "capabilities", ())}:
+                label = f"{getattr(model, 'provider', '')} · {model.id}".strip(" ·")
+                if label not in found:
+                    found.append(label)
+            if len(found) >= limit:
+                break
+        return found
+
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<ModelRouter {self.describe_active()}>"

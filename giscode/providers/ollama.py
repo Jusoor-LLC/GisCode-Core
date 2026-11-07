@@ -99,11 +99,23 @@ class OllamaProvider(Provider):
             families = details.get("families") or []
             if isinstance(families, str):
                 families = [families]
-            capabilities = ["text", "chat"]
-            for family in families:
-                mapped = _FAMILY_CAPABILITIES.get(str(family).strip().lower())
-                if mapped and mapped not in capabilities:
-                    capabilities.append(mapped)
+            # Ollama reports the real capability list (``completion``, ``vision``,
+            # ``tools``, ``thinking``...). Trust it: guessing from the family name
+            # made a model that can read images look text-only, so GisCode refused
+            # every image request it could actually have answered.
+            reported = entry.get("capabilities")
+            capabilities: list[str] = []
+            if isinstance(reported, list):
+                capabilities = [str(item).strip().lower() for item in reported if str(item).strip()]
+            if not capabilities:
+                # Older Ollama builds omit the field; fall back to the family map.
+                capabilities = ["text", "chat"]
+                for family in families:
+                    mapped = _FAMILY_CAPABILITIES.get(str(family).strip().lower())
+                    if mapped and mapped not in capabilities:
+                        capabilities.append(mapped)
+            elif "completion" in capabilities and "chat" not in capabilities:
+                capabilities.append("chat")
             models.append(
                 ProviderModel(
                     id=name,

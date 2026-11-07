@@ -2000,7 +2000,7 @@ class MainWindow:
 
     def _run_task(self, message, attachments, epoch: int) -> None:
         if self._gisai_engine is None:
-            self._run_core_task(message, epoch)
+            self._run_core_task(message, epoch, attachments)
             return
         try:
             task = self._gisai_engine.receive(
@@ -2016,7 +2016,7 @@ class MainWindow:
         except Exception as exc:
             self._worker_results[epoch] = (None, exc, epoch, None)
 
-    def _run_core_task(self, message, epoch: int) -> None:
+    def _run_core_task(self, message, epoch: int, attachments=None) -> None:
         """Execute a supported deterministic task without any GisAI engine.
 
         The dispatcher owns parsing, execution, independent read-back
@@ -2042,7 +2042,10 @@ class MainWindow:
                 # Core edits ask the same person through the same
                 # thread-safe queue the engine-backed path uses.
                 approve=self._approve_edit,
-                model_router=self._selected_model_router("chat"),
+                model_router=self._selected_model_router(
+                    "vision" if self._has_image_attachment(attachments) else "chat"
+                ),
+                attachments=attachments,
             )
         except Exception as exc:  # never let a dispatcher bug look like success
             self._worker_results[epoch] = (None, exc, epoch, task)
@@ -2086,6 +2089,20 @@ class MainWindow:
             return None
         self._model_router_cache = router
         return router
+
+    @staticmethod
+    def _has_image_attachment(attachments) -> bool:
+        """True when at least one attachment is an image the router can send."""
+        try:
+            from giscode.vision.images import SUPPORTED_IMAGE_SUFFIXES
+        except Exception:  # pragma: no cover - vision support is always present
+            return False
+        for item in attachments or []:
+            path = str(getattr(item, "path", "") or "")
+            mime = str(getattr(item, "mime_type", "") or "").lower()
+            if mime.startswith("image/") or Path(path).suffix.lower() in SUPPORTED_IMAGE_SUFFIXES:
+                return True
+        return False
 
     def _remaining_task_budget(self) -> Optional[float]:
         """Time left on the task clock, or None when no budget was started."""

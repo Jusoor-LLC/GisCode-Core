@@ -210,6 +210,25 @@ To make an Ollama model the one Projects uses, save a profile with purpose
 The reply is the model's own text, it ends with the provider and model that
 produced it, and the change summary confirms nothing was written.*
 
+### Attachments use the `vision` profile
+
+An image is sent to the model in the **vision** profile. If that purpose has no
+profile, a **chat** profile whose model is vision-capable is used and labelled as
+such; otherwise the request is refused with a pointer to Model Manager. GisCode
+never sends an image to a text-only model.
+
+![Chat analysing an attached image](images/vision-chat.png)
+
+*`code.png` attached and read by `qwen2.5vl:7b`, which returned the code it saw.*
+
+Ollama publishes a capability list per model (`completion`, `vision`, `tools`,
+`thinking`), so the model picker reflects what the server says. LM Studio and
+generic OpenAI-compatible endpoints publish nothing, so they stay text-only
+unless you mark that provider vision-capable in its configuration. Images are
+validated (format, readability, 16 MB limit) before anything is sent, and the
+prompt treats anything written inside an image as untrusted data rather than
+instructions.
+
 ---
 
 ## 7. Test that it works

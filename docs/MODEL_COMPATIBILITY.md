@@ -37,10 +37,23 @@ or in the folder set by `paths.models_dir` in `~/.giscode/config.json`.
 
 ### Vision models
 
-A vision model has two parts: the model itself and a projector (`mmproj`) file.
-Both must be GGUF, and both must be present. With the model but without the
-projector, chat works and **Analyze Attachment** reports that vision is
-unavailable. That is expected behaviour, not a bug.
+There are two ways to get image analysis, and they have different requirements.
+
+**Provider route (recommended).** An Ollama model that declares `vision` needs no
+GGUF handling at all: pick it in a **vision** profile in Model Manager and attach
+the image in Chat. Ollama reports the capability itself, so the model picker only
+offers models that genuinely accept images. LM Studio and custom
+OpenAI-compatible endpoints publish no capability metadata, so they are treated
+as text-only unless that provider is explicitly marked vision-capable in its
+configuration - GisCode never infers vision from a model's name.
+
+**GisCode's own runtime.** A GGUF vision model has two parts: the model itself
+and a projector (`mmproj`) file. Both must be GGUF and both must be present. With
+the model but without the projector, text chat works and the local vision path
+reports that it is unavailable. That is expected behaviour, not a bug.
+
+A model that fits in memory but cannot read images is still a fine text model;
+vision is a separate capability, reported separately.
 
 ---
 

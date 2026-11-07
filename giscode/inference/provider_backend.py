@@ -151,6 +151,14 @@ class ProviderChatBackend:
 
     @property
     def supports_vision(self) -> bool:
+        """Metadata first; an explicit per-provider declaration only as a fallback.
+
+        The declaration exists for servers that publish no capability list. It is
+        never inferred from a model's name, so an ambiguously named model does not
+        get an image it cannot read.
+        """
+        if getattr(self.provider, "allow_vision", False):
+            return True
         meta = self._model_meta()
         return bool(meta and "vision" in {c.lower() for c in meta.capabilities})
 

@@ -113,6 +113,7 @@ class ProviderRegistry:
                     timeout=self._timeout,
                     api_key=api_key,
                     allow_remote=bool(config.get("allow_remote", False)),
+                    allow_vision=bool(config.get("vision", False)),
                 )
             return builder(
                 str(config.get("endpoint") or DEFAULT_ENDPOINTS.get(kind, "")),
@@ -120,6 +121,7 @@ class ProviderRegistry:
                 api_key=api_key,
                 allow_remote=bool(config.get("allow_remote", False)),
                 label=str(config.get("label") or ""),
+                allow_vision=bool(config.get("vision", False)),
             )
         except ValueError:
             # A stored endpoint that no longer validates is a configuration

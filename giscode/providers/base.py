@@ -202,6 +202,11 @@ class Provider:
     supports_delete: bool = False
     #: Why downloads are unavailable, shown verbatim in the UI.
     download_note: str = ""
+    #: True only when the user explicitly declared this endpoint vision-capable.
+    #: Needed for servers that publish no capability metadata at all (LM Studio's
+    #: /v1/models, a generic OpenAI-compatible URL). GisCode never infers vision
+    #: support from a model's name.
+    allow_vision: bool = False
 
     def __init__(
         self,
@@ -211,6 +216,7 @@ class Provider:
         api_key: str = "",
         allow_remote: bool = False,
         label: str = "",
+        allow_vision: bool = False,
     ) -> None:
         self.endpoint = validate_endpoint(
             endpoint or DEFAULT_ENDPOINTS.get(self.kind, ""),
@@ -219,6 +225,7 @@ class Provider:
         self.timeout = timeout
         self._api_key = api_key
         self.allow_remote = allow_remote
+        self.allow_vision = bool(allow_vision) or bool(type(self).allow_vision)
         if label:
             self.label = label
 

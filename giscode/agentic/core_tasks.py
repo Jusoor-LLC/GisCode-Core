@@ -482,6 +482,23 @@ def _verify_read_back(target: Path, expected: str) -> tuple[bool, dict]:
     return ok, verification
 
 
+def _attachment_images(attachments) -> list[str]:
+    """Image paths among *attachments*, using the vision module's own format list."""
+    try:
+        from giscode.vision.images import SUPPORTED_IMAGE_SUFFIXES
+    except Exception:  # pragma: no cover - vision support is always present
+        SUPPORTED_IMAGE_SUFFIXES = frozenset({'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'})
+    paths: list[str] = []
+    for item in attachments or []:
+        path = str(getattr(item, "path", "") or "")
+        if not path:
+            continue
+        mime = str(getattr(item, "mime_type", "") or "").lower()
+        if mime.startswith("image/") or Path(path).suffix.lower() in SUPPORTED_IMAGE_SUFFIXES:
+            paths.append(path)
+    return paths
+
+
 def _model_selected(router) -> bool:
     """True when a profile or a legacy model setting actually names a model.
 
@@ -527,6 +544,7 @@ def execute_request(
     approve: Optional[Callable[[Path, str], bool]] = None,
     model_router: Optional[object] = None,
     model_purpose: str = "chat",
+    attachments: Optional[list] = None,
 ) -> dict:
     """Run one supported deterministic request in *project_root*.
 
@@ -554,9 +572,32 @@ def execute_request(
     except Refused as exc:
         capability = getattr(exc, "capability", "unknown")
         status = getattr(exc, "status", capabilities.UNSUPPORTED)
+        images = _attachment_images(attachments)
+        if images and status != capabilities.PRO_ONLY and _model_selected(model_router):
+            from giscode.agentic.model_chat import answer_with_model
+
+            return answer_with_model(
+                message,
+                project_root,
+                router=model_router,
+                task_id=task_id,
+                should_cancel=cancelled,
+                deadline_s=deadline_s,
+                purpose="vision",
+                images=images,
+            )
         if _should_ask_the_model(status, capability, model_router):
             from giscode.agentic.model_chat import answer_with_model
 
+            if attachments:
+                return _failure(
+                    task_id,
+                    capability,
+                    "this attachment type is not analysed by Core; only images are "
+                    "sent to a vision model",
+                    status=capabilities.FAILED,
+                    observations=["nothing was sent to the model"],
+                )
             return answer_with_model(
                 message,
                 project_root,
