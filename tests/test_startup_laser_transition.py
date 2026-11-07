@@ -44,6 +44,8 @@ from giscode.inference.runtime import SubprocessLlamaCppRuntime
 def test_laser_splash_beam_sweeps_then_morphs_and_closes(tk_root):
     transitions = []
     splash = show_laser_splash(tk_root, on_transition=lambda: transitions.append(1))
+    if getattr(splash, "_reduced_motion", False):
+        pytest.skip("Windows animations are disabled; reduced-motion is the expected path")
     assert splash._photo is not None, "laser splash must load the Gis artwork"
     x0 = splash.beam_x
     for _ in range(400):
