@@ -73,6 +73,38 @@ def build_provider_panel(parent, window):
     ttk.Entry(add_row, textvariable=label_var, width=16).pack(side=tk.LEFT, padx=(6, 4))
     ttk.Entry(add_row, textvariable=endpoint_var, width=28).pack(side=tk.LEFT, padx=(0, 4))
 
+    # ----- attachments and remote endpoints -------------------------------
+    # A remote endpoint answering text is one decision; uploading a picture to
+    # it is another. This is the second one, and it starts off.
+    consent_var = tk.BooleanVar(value=bool(settings.get("providers.remote_attachments", False)))
+
+    def toggle_attachment_consent() -> None:
+        settings.set("providers.remote_attachments", bool(consent_var.get()))
+        try:
+            settings.save()
+        except Exception:
+            pass
+
+    consent_row = ttk.Frame(parent)
+    consent_row.pack(anchor=tk.W, pady=(2, 0))
+    ttk.Checkbutton(
+        consent_row,
+        text="Allow images to be sent to remote (non-loopback) providers",
+        variable=consent_var,
+        command=toggle_attachment_consent,
+    ).pack(side=tk.LEFT)
+    ttk.Label(
+        parent,
+        text=(
+            "Off by default. Until this is enabled, a remote endpoint can answer "
+            "text but an attached image is refused before it is sent. Local "
+            "providers are never affected."
+        ),
+        foreground="gray",
+        wraplength=900,
+        justify=tk.LEFT,
+    ).pack(anchor=tk.W, pady=(0, 4))
+
     # ----- profiles -------------------------------------------------------
     ttk.Separator(parent, orient="horizontal").pack(fill=tk.X, pady=(10, 8))
     ttk.Label(parent, text="Model profiles", font=("Segoe UI", 10, "bold")).pack(anchor=tk.W)

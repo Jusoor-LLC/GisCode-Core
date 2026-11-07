@@ -32,6 +32,8 @@ class _Provider:
     def __init__(self, models, kind=OLLAMA):
         self.kind = kind
         self.label = "Fake"
+        # Loopback, so provider attachments need no extra consent here.
+        self.endpoint = "http://127.0.0.1:11434" if kind == OLLAMA else "http://127.0.0.1:1234/v1"
         self.allow_remote = False
         self.calls = []
         self._models = list(models)

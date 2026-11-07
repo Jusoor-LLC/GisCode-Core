@@ -229,6 +229,12 @@ validated (format, readability, 16 MB limit) before anything is sent, and the
 prompt treats anything written inside an image as untrusted data rather than
 instructions.
 
+Sending an image to a **remote** endpoint needs its own consent: *Allow images to
+be sent to remote (non-loopback) providers* in Model Manager, off by default. A
+remote endpoint without it still answers text, but the image is refused before
+transmission and the refusal names the endpoint. Local providers never need this,
+and an endpoint GisCode cannot classify is treated as remote.
+
 ---
 
 ## 7. Test that it works

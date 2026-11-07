@@ -44,7 +44,7 @@ from giscode.inference.runtime import (
     GenerationRequest,
     GenerationResponse,
 )
-from giscode.providers.base import OLLAMA, Provider, ProviderError
+from giscode.providers.base import OLLAMA, Provider, ProviderError, is_loopback
 
 #: A local model can be slow to first token; the caller may override this.
 DEFAULT_CHAT_TIMEOUT = 180.0
@@ -92,6 +92,7 @@ class ProviderChatBackend:
         purpose: str = "coding",
         timeout: float = DEFAULT_CHAT_TIMEOUT,
         allow_remote: bool = False,
+        attachment_consent: bool = False,
     ) -> None:
         if not str(model or "").strip():
             raise ModelNotFoundError(
@@ -102,6 +103,10 @@ class ProviderChatBackend:
         self.purpose = purpose
         self.timeout = max(5.0, float(timeout))
         self.allow_remote = bool(allow_remote)
+        # Sending a picture off this PC is a separate decision from letting a
+        # remote endpoint answer text. It defaults to no and is only ever turned
+        # on by the user.
+        self._attachment_consent = bool(attachment_consent)
         self._cancel_event = threading.Event()
         self._lock = threading.Lock()
         # Probing the provider on every planner step would hammer a local
@@ -161,6 +166,15 @@ class ProviderChatBackend:
             return True
         meta = self._model_meta()
         return bool(meta and "vision" in {c.lower() for c in meta.capabilities})
+
+    @property
+    def is_remote(self) -> bool:
+        """True when this provider's endpoint is not on this machine."""
+        return not is_loopback(getattr(self.provider, "endpoint", ""))
+
+    @property
+    def allows_attachments_off_pc(self) -> bool:
+        return (not self.is_remote) or self._attachment_consent
 
     @property
     def available(self) -> bool:
@@ -250,6 +264,17 @@ class ProviderChatBackend:
                 "model in Model Manager."
             )
         messages = self._messages_for(request)
+        if getattr(request, "images", None) and not self.allows_attachments_off_pc:
+            # Refuse before the first byte leaves the machine. This is the one
+            # boundary that must never depend on which model was selected.
+            raise InferenceUnavailableError(
+                "This image was not sent. "
+                f"{self.describe()} is a remote endpoint "
+                f"({self.provider.secret_free_endpoint()}), and sending an "
+                "attachment off this PC needs your explicit consent. Enable "
+                "'Allow images to remote providers' in Model Manager, or switch "
+                "to a local provider. Nothing left this computer."
+            )
         if self._cancel_event.is_set():
             # A cancel that arrived before the request did is a decision, not a
             # stale flag: consume it and do not spend the provider's time.

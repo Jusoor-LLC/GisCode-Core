@@ -292,6 +292,14 @@ Privacy note: analysis runs on the provider you configured. A loopback provider
 means nothing leaves the machine; remote endpoints are opt-in per provider and
 the endpoint is shown in the footer.
 
+**Remote endpoints need a second, separate yes before an image is sent.** In
+Model Manager, *Allow images to be sent to remote (non-loopback) providers* is
+off by default. While it is off, a remote endpoint can answer text but an
+attached image is refused **before transmission**, with the endpoint named and
+the line `Nothing left this computer.` Turning it on is a setting you change
+deliberately; adding an endpoint or selecting a model never grants it, and
+switching to a remote provider re-checks it on the next request.
+
 ---
 
 ## 7. Settings

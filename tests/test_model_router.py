@@ -23,6 +23,9 @@ class _Provider:
     def __init__(self, models=("m1",), reply="pong", vision=False, kind=OPENAI_COMPAT):
         self.kind = kind
         self.label = "Fake"
+        # A real provider always has an endpoint; a loopback one needs no
+        # attachment consent.
+        self.endpoint = "http://127.0.0.1:9999/v1"
         self.allow_remote = False
         self.reply = reply
         self.calls = []

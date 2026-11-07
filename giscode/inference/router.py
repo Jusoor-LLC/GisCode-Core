@@ -113,6 +113,19 @@ class ModelRouter:
     def builtin(self) -> Any:
         return self._builtin
 
+    def _setting(self, key: str, default=None):
+        getter = getattr(self._source, "get", None)
+        if callable(getter):
+            try:
+                return getter(key, default)
+            except Exception:
+                return default
+        return default
+
+    def _attachment_consent(self) -> bool:
+        """Opt-in for sending attachments to a remote endpoint. Default: no."""
+        return bool(self._setting("providers.remote_attachments", False))
+
     def _legacy_model(self) -> str:
         value = ""
         getter = getattr(self._source, "get", None)
@@ -200,7 +213,10 @@ class ModelRouter:
                 f"the {target.provider_id} provider is not configured",
                 action="Open Model Manager → Providers and add or enable it.",
             )
-        key = (target.provider_id, target.model)
+        consent = self._attachment_consent()
+        # Consent is part of the key: toggling it must not reuse a backend built
+        # under the opposite decision.
+        key = (target.provider_id, target.model, consent)
         with self._lock:
             backend = self._backends.get(key)
             if backend is None:
@@ -210,6 +226,7 @@ class ModelRouter:
                     purpose=target.purpose,
                     timeout=self._timeout,
                     allow_remote=bool(getattr(provider, "allow_remote", False)),
+                    attachment_consent=consent,
                 )
                 self._backends[key] = backend
         return backend
