@@ -9,8 +9,17 @@ required, and no account is needed.
 > **Status: early alpha.** This is a working research project, not a finished
 > product. It is developed and tested on Windows only. There is no installer yet.
 >
-> **New here?** Start with the [Quick start](docs/QUICKSTART.md); if startup
-> fails, use [Troubleshooting](docs/TROUBLESHOOTING.md).
+> **New here?** Install with [Installation](docs/INSTALLATION.md), learn the
+> window with the [User guide](docs/USER_GUIDE.md), connect a model with
+> [Local AI setup](docs/LOCAL_AI_SETUP.md), and check what fits your machine
+> with [Model compatibility](docs/MODEL_COMPATIBILITY.md). For the one-page
+> version use the [Quick start](docs/QUICKSTART.md); if startup fails, use
+> [Troubleshooting](docs/TROUBLESHOOTING.md).
+
+![The GisCode Core main window](docs/images/main-window.png)
+
+*GisCode Core on Windows. Every screenshot in these docs is taken from the real
+application.*
 
 ## Editions
 
@@ -51,6 +60,12 @@ so GisCode reports them as unavailable and runs the Core tools.
   fails. An 8-job benchmark in October 2026 scored **0 of 8** with the small
   local models used at the time. A larger, stronger coder model is the single
   biggest improvement available to you.
+- **The Core build has no free-form chat or image analysis.** Chat performs
+  deterministic file operations and declines the rest with "GisCode Core cannot
+  carry out that request without GisAI"; **Analyze Attachment** fails the same
+  way. Both need the generative GisAI engine, which is not in this repository.
+  Planning in Projects is the part that calls the local model. See
+  [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md#3-use-the-chat-tab).
 - **Lessons are not yet used.** Outcomes are recorded, but recorded lessons are
   not injected into later prompts, so the agent does not measurably improve
   from its own history yet.
@@ -63,6 +78,34 @@ so GisCode reports them as unavailable and runs the Core tools.
   shows no advertising. See [`docs/ADVERTISING.md`](docs/ADVERTISING.md).
 - Packaging is partial: a PyInstaller recipe exists (`GisCode.spec`), but no
   release build is provided or supported.
+
+## Local-only operation, and models versus servers
+
+GisCode Core runs on your machine and talks to a `llama-server` process that it
+starts itself on loopback. There is no account, no telemetry, no analytics and no
+working advertising provider in this build.
+
+Two steps are easy to confuse:
+
+| Step | What it means | Who does it |
+| --- | --- | --- |
+| **Installing a model** | Putting a `.gguf` file on disk — a download you perform | You |
+| **Connecting it to GisCode** | GisCode discovering that file, starting its own `llama-server`, loading the file and answering a prompt | GisCode, using the server binary and model folder you supply |
+
+Downloading a model does not connect it. The file must sit in a folder GisCode
+scans (`~/.giscode/models`, `~/.lmstudio/models`,
+`C:\Users\Public\lmstudio\models`, or the `paths.models_dir` setting) and a
+`llama-server` binary must be available.
+
+GisCode does **not** connect to Ollama, and it does **not** connect to LM
+Studio's local API. It reuses LM Studio's downloaded GGUF files and its bundled
+llama.cpp backend, then runs the model in its own server process. See
+[Local AI setup](docs/LOCAL_AI_SETUP.md) for the details and the limitation.
+
+The only things that leave your machine are the ones you initiate: installing
+Python packages from PyPI, and downloading models, servers or code yourself.
+Once those are on disk, GisCode works offline. The optional hosted writer is a
+Pro feature, disabled by default, and absent from this repository.
 
 ## Requirements
 
@@ -179,6 +222,21 @@ and is not required to run from source. The frozen build has no console, so
 look in the log file under `~/.giscode/logs` when it misbehaves.
 
 ## Documentation
+
+Start here:
+
+- [`docs/INSTALLATION.md`](docs/INSTALLATION.md) — prerequisites, step-by-step
+  install, first launch, verification and upgrade/removal.
+- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — the Core interface: Chat,
+  Projects, Model Manager, attachment analysis, model selection and common
+  workflows.
+- [`docs/LOCAL_AI_SETUP.md`](docs/LOCAL_AI_SETUP.md) — how GisCode runs models,
+  model folders, `llama-server` discovery, and what is and is not supported
+  (including Ollama and LM Studio).
+- [`docs/MODEL_COMPATIBILITY.md`](docs/MODEL_COMPATIBILITY.md) — supported
+  formats, quantization, VRAM/RAM guidance and model selection.
+
+Reference:
 
 - [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — clean Windows install, first run,
   local model setup, upgrade and manual removal.

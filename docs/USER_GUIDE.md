@@ -1,0 +1,310 @@
+# GisCode Core user guide
+
+This guide explains what you see when GisCode Core starts, and walks through the
+tasks most people do first: asking a question, choosing a model, running a task
+in a project, analysing an image, and finding an earlier conversation.
+
+It describes **GisCode Core v0.1.0** as shipped in this repository. GisCode is
+early alpha: some things are unfinished, and the guide says so where that
+matters.
+
+---
+
+## 1. What GisCode Core is
+
+GisCode is a local-first coding assistant with a desktop window. You describe a
+change in a project folder; GisCode plans it with your local model, edits files
+with your approval, runs commands and tests, and reports the result.
+
+Planning is the part that genuinely runs on your local model today. The
+generative execution engine (GisAI) is not part of this public repository, so
+expect the deterministic Core operations described below rather than an
+autonomous agent.
+
+Everything runs on your machine. No account is needed, and no cloud service is
+used.
+
+The Core edition includes: **Chat**, **Projects**, **attachment analysis**, the
+**Model Manager**, essential **Settings**, and the **AdSpace** panel. The
+developer and release tools (Terminal, iOS/xtool, GisLogo, Developer & Release,
+Device Preview, Generate Video, Project Doctor, hosted-writer settings) belong to
+the separate GisCode Pro edition and are **not** present here. See
+[`CORE_AND_PRO.md`](CORE_AND_PRO.md).
+
+---
+
+## 2. The window at a glance
+
+![The GisCode Core main window](images/main-window.png)
+
+*The main window: header controls at the top, then the tab strip, then the active
+tab's content.*
+
+### Header row
+
+| Control | What it does |
+| --- | --- |
+| **Mode** | `Assistant`, `Planner`, `Coder` or `Reviewer` — the role the model is asked to take for the task. |
+| **Model** | `Auto` plus every model GisCode discovered. Picking one pins it; `Auto` lets GisCode choose. |
+| **Model Manager** | Jumps to the Model Manager tab. |
+| **Stop** | Cancels the task currently running. It is disabled when nothing is running. |
+
+### Tabs
+
+| Tab | Purpose |
+| --- | --- |
+| **Projects** | Open a project folder, plan work, and run approved changes. |
+| **Chat** | Ask questions and get replies; attach and analyse images; open conversation history. |
+| **Settings** | Model summary and a shortcut to the Model Manager. |
+| **Model Manager** | Load, unload and inspect models and the backend in use. |
+| **AdSpace** | The advertising panel. It has no provider in this build and says so; it shows no ads. See [`ADVERTISING.md`](ADVERTISING.md). |
+
+The window title is a status indicator, not decoration: it shows
+`No model loaded`, `Loading...`, `Loaded: <model> <context>`, or an error such as
+`No model - <reason>`.
+
+### Before your first task
+
+1. A model is loaded (title shows `Loaded: ...`). If not, see
+   [`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md).
+2. You have a project folder you are willing to let GisCode propose changes in.
+   Start with a copy, or a folder under version control.
+
+---
+
+## 3. Use the Chat tab
+
+**Important, and often surprising:** in this public build the Chat tab is a
+*request channel*, not a free-form chatbot. GisCode Core carries out the requests
+it can perform deterministically and **declines the rest** instead of
+improvising with the model.
+
+What Core can carry out: `create_file` (create a file), `read_file` (read a
+file), `list_files` (list files), `search_text` (search text), `replace_text`
+(replace text in one file).
+
+1. Open the **Chat** tab.
+2. Type the request in the input box at the bottom of the **GisCode Assistant**
+   panel.
+3. Press **Enter** (or **Ctrl+Enter**), or click **Send**.
+4. The result appears in the panel above, with a **CHANGE SUMMARY** showing how
+   many files changed and whether validation ran. **Stop** cancels a request in
+   progress.
+
+A general question such as *"What is a GGUF file?"* is answered like this:
+
+```
+GisCode Core cannot carry out that request without GisAI.
+Supported here: create_file (create a file), read_file (read a file), ...
+Request status: unsupported (unknown).
+Reason: no supported Core capability matches this request.
+
+No deterministic Core operation performs it, and Core does not improvise.
+Nothing was changed.
+```
+
+That is the designed behaviour of the Core edition, not a model or install
+problem. Free-form conversation and generative work belong to the GisAI engine,
+whose code is not part of this public repository. If you loaded a model and still
+see this message, the model is fine — the feature is simply not in Core.
+
+Other notes:
+
+- While a request runs, **Send** is unavailable and **Stop** is enabled.
+- **Copy latest response** copies the most recent result to the clipboard.
+- **History** (Core only) opens the conversation list inside the Chat tab —
+  see [section 8](#8-reuse-an-earlier-conversation).
+- Chat does not edit files on its own initiative; it performs the supported
+  operations you ask for and reports exactly what changed.
+
+### Choosing the right mode
+
+| Mode | Use it for |
+| --- | --- |
+| **Assistant** | General questions and explanations. The default. |
+| **Planner** | Turning a goal into a step-by-step plan. |
+| **Coder** | Producing or reviewing code. |
+| **Reviewer** | Critiquing a change or a plan. |
+
+The mode changes how the model is asked to behave; it does not change which
+model is loaded.
+
+---
+
+## 4. Work in a project
+
+Projects are where GisCode actually changes files. The design is deliberately
+cautious: edits and destructive commands need your approval.
+
+1. Open the **Projects** tab.
+2. Click **Open project** and choose the folder you want to work in.
+3. Describe the goal in the project's prompt area — one well-scoped change at a
+   time works far better than a large request.
+4. Review the plan the Planner produces. It is a proposal, not an action.
+5. Use **Approve & Start** to hand the approved plan to the build loop.
+6. Approve individual file edits as they are proposed. Read the diff before
+   approving; **View Diff** shows it.
+7. Let GisCode run the project's tests and report verification.
+8. Read the outcome. Success, failure, timeout, and "could not run" are reported
+   as different results — a run that could not complete is never shown as a pass.
+
+The Planer sub-tab is the part of Core that sends your request to the local
+model. Its box is labelled **Plan request (planning only)**: it authors a plan,
+and does not edit files. **Save Plan**, **Get Readiness** and **Approve & Start**
+operate on the plan the model produced.
+
+**Known limitation (v0.1.0):** planning is slow with small local models, and
+while testing for this documentation a plan request could sit without producing
+an answer. If **Plan** leaves the reply line empty, treat that as a limitation of
+this alpha build rather than a broken install, and check the newest file in
+`~/.giscode/logs`.
+
+**Close project** releases the folder without deleting anything.
+
+### What confinement means
+
+Every action is resolved inside the selected project folder. Paths that would
+escape it are rejected, and commands run with a timeout. This protects the rest
+of your disk; it does not make a bad edit impossible, which is why approval
+matters.
+
+### Practical advice
+
+- Start with a task you could finish yourself in ten minutes.
+- Keep the project under version control so you can revert.
+- If a plan is wrong, correct it before approving rather than approving and
+  fixing afterwards.
+- Small local models fail at multi-file work more often than at single-file work.
+  See [`MODEL_COMPATIBILITY.md`](MODEL_COMPATIBILITY.md).
+
+---
+
+## 5. Choose, load and switch models
+
+1. Open **Model Manager**.
+2. Read the backend note: it reports which `llama-server` GisCode found.
+3. In the header **Model** dropdown, pick a model, or keep `Auto`. The dropdown
+   lists `Auto` plus every model GisCode discovered.
+4. Click **Load selected model**. The status line reports progress and then
+   readiness; the title bar switches to `Loaded: ...`.
+5. To free memory, click **Unload current model**, then load another.
+
+![Model Manager](images/model-manager.png)
+
+*Model Manager: the backend GisCode resolved, the model status line, and the
+load/unload controls. A grey note about CPU-only loading is information about
+the machine, not a failure.*
+
+- **Red text** is an error: the load failed, or the server could not start.
+- **Grey text** is a fact about the machine, such as running without GPU offload.
+- Loading can take minutes for a large model the first time.
+- Only one model is loaded at a time. Switching models unloads the previous one.
+
+Model files must be GGUF and in a folder GisCode scans; see
+[`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md#5-put-the-model-where-giscode-looks).
+
+---
+
+## 6. Attach an image
+
+The attachment row under the conversation has **Attach Image** and **Analyze
+Attachment**.
+
+1. Click **Attach Image** and choose a picture. The label confirms what is
+   attached, for example `Attached: diagram.png (PNG, 4.3 KB)`.
+2. The attachment is recorded with the conversation turn.
+3. **Analyze Attachment** asks the application to read the image.
+
+**Known limitation in this build:** there is no working image-understanding path
+in the public Core edition. Clicking **Analyze Attachment** ends with a red
+`Task failed` status and a refusal in the conversation, because the vision step
+is driven by the generative engine that this repository does not contain. A
+vision model plus its `mmproj` projector still trains nothing: the model can be
+loaded, but Core has nothing to send the image to.
+
+So: attaching images and keeping them with the conversation works; automatic
+analysis does not, and GisCode says so rather than inventing a description.
+
+Privacy note: nothing is uploaded. There is no cloud call in this path.
+
+---
+
+## 7. Settings
+
+The **Settings** tab is deliberately small in Core:
+
+- A **Model** section showing the current model status and an **Open Model
+  Manager** button.
+- An **Advanced settings** section that states plainly that hosted-writer and
+  self-improvement settings are Pro features. Core runs entirely on your machine.
+
+Settings are stored in `~/.giscode/config.json`. Editing that file by hand works,
+but close GisCode first so changes are not overwritten.
+
+Useful environment variables (set them before launching):
+
+| Variable | Effect |
+| --- | --- |
+| `GISCODE_HOME` | Redirects all profile writes (config, chats, logs) elsewhere. |
+| `GISCODE_LLAMA_SERVER_PATH` | Pins a specific `llama-server.exe`. |
+| `GISCODE_LLAMA_READY_TIMEOUT` | Seconds to wait for the server's `/health` (default 60). |
+| `GISCODE_EDITION` | `pro` requests Pro tools (absent from this repository); anything else is Core. |
+
+---
+
+## 8. Reuse an earlier conversation
+
+1. Open **Chat** and click **History**.
+2. The **Conversation History** panel lists saved conversations; selecting one
+   shows its detail on the right.
+3. Use **Open Conversation** to continue it, **Rename** to label it, **Delete**
+   to remove it, and **New Chat** to start fresh.
+
+Conversations are stored in `~/.giscode/chats.db`. They are part of your local
+profile; back up `~/.giscode` if they matter to you.
+
+Long conversations also consume the model's context window. If replies degrade
+in a long session, start a new chat — that is usually the cause, not a broken
+model.
+
+---
+
+## 9. What Core does not do
+
+Knowing the limits saves time:
+
+- **No free-form conversation.** Chat carries out deterministic file
+  operations; general questions get the "cannot carry out that request without
+  GisAI" refusal. See [section 3](#3-use-the-chat-tab).
+- **No working image analysis.** Attaching an image works; analysing it fails
+  with `Task failed`. See [section 6](#6-attach-an-image).
+- **No file edits from Chat.** Only Projects changes files, and only with
+  approval.
+- **No model downloads.** You supply GGUF files.
+- **No Ollama, and no connection to LM Studio's API.** See
+  [`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md).
+- **No installer, no background service, no auto-update.** You run it from
+  source.
+- **No telemetry or analytics.** Nothing reports usage anywhere.
+- **No working ad provider.** The AdSpace panel says so and shows nothing.
+- **Pro tools are absent**, not hidden behind a paywall in this build.
+
+---
+
+## 10. When something goes wrong
+
+Start with [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), which covers startup
+failures, model and server problems, memory pressure, and first-launch issues. If
+you are reporting a bug, include the newest log file from `~/.giscode/logs` and
+the exact text shown in Model Manager.
+
+---
+
+## 11. Related documentation
+
+- [`INSTALLATION.md`](INSTALLATION.md) — install and first launch.
+- [`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md) — servers, model folders, providers.
+- [`MODEL_COMPATIBILITY.md`](MODEL_COMPATIBILITY.md) — formats, memory, model
+  choice.
+- [`QUICKSTART.md`](QUICKSTART.md) — one-page install.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the pieces fit together.
