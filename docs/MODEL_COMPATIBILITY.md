@@ -20,7 +20,7 @@ the runtime build, and how much of the model is offloaded to a GPU.
 | ONNX | No | Not read by GisCode. |
 | GGML legacy (non-GGUF) | No | Superseded format. |
 | GPTQ / AWQ / EXL2 | No | These are formats for other runtimes, not GGUF. |
-| Ollama's internal blobs | No | See [`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md#3-ollama--not-supported). |
+| Ollama's internal blobs | No | See [`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md#3-ollama-provider). |
 
 GisCode does not convert models. If a publisher only offers safetensors, you need
 a GGUF build of the same model — most popular models have one.

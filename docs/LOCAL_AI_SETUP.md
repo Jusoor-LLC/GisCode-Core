@@ -1,251 +1,229 @@
 # Connecting a local AI model to GisCode Core
 
-GisCode Core runs a model on your own machine. This guide explains exactly how
-that works in this version, what is supported, and what is not — including the
-two providers people most often ask about, **Ollama** and **LM Studio**.
+GisCode Core runs models on your own machine. There are two ways to do that, and
+this guide covers both:
 
-Read the short version first, because it prevents most wasted time:
+1. **GisCode's own runtime.** You give it a **GGUF** file and a `llama-server`
+   binary; GisCode starts the server itself. This is the default.
+2. **Another local server.** Ollama, LM Studio's local server, or any
+   OpenAI-compatible endpoint, selected in **Model Manager → Local providers**.
 
-> GisCode Core is **not** a generic OpenAI-API client. It does not take an
-> endpoint URL and it does not talk to another app's server. It runs its **own
-> `llama-server`** (from llama.cpp) as a child process, loads a **GGUF** file
-> into it, and talks to that server over loopback.
-
-Everything else in this guide follows from that one design decision.
+Both are local. Neither needs an account, and neither sends your project
+anywhere.
 
 ---
 
-## 1. The three moving parts
+## 1. Which route should you use?
 
-| Part | What it is | Who supplies it |
+| You already have... | Use | Why |
 | --- | --- | --- |
-| **Model file** | A `.gguf` file containing the weights | You |
-| **`llama-server`** | The llama.cpp binary that runs the file and answers requests | You (or LM Studio's bundled copy) |
-| **GisCode** | Starts the server, sends prompts, applies edits, runs tests | This repository |
+| A `.gguf` file | GisCode's own runtime | Full control over context and offload; GisCode reports exactly what it loaded. |
+| Ollama installed with models pulled | Ollama provider | No second copy of the weights; Ollama owns loading and memory. |
+| LM Studio installed with models downloaded | LM Studio provider, or LM Studio's files | The provider asks LM Studio's server; the file route loads the GGUF in GisCode's own server. |
+| Another local server (llama.cpp, vLLM, ...) | OpenAI-compatible endpoint | If it serves `/v1/models`, GisCode can list and use it. |
 
-GisCode does not download models, and it does not bundle a server. It finds
-both, starts the server on a loopback port, waits for the server's `/health`
-endpoint to answer, and then sends your prompts to it.
-
----
-
-## 2. What "supported" means here
-
-Supported today:
-
-- **GGUF model files**, for text chat and coding models.
-- **GGUF vision models plus their companion projector file** (`mmproj`), for
-  attachment analysis.
-- Any `llama-server` build you point it at, including the one LM Studio ships.
-
-Not supported in this version:
-
-- **Ollama.** See [section 3](#3-ollama--not-supported).
-- **Connecting to LM Studio's local server API.** See
-  [section 4](#4-lm-studio--supported-through-its-files-not-its-api).
-- **safetensors, PyTorch `.bin`, ONNX, GGML (non-GGUF) or GPTQ files.**
-- **Remote or hosted inference endpoints.** A hosted writer exists only in the
-  Pro edition and is disabled by default; it is not part of Core.
-
-If you were expecting to paste `http://localhost:11434` or
-`http://localhost:1234` into a settings field: there is no such field in Core.
-That is a design choice, not a missing screen.
+You can have several at once. A **profile** records which provider and model you
+want for coding, reasoning, chat or vision.
 
 ---
 
-## 3. Ollama — not supported
+## 2. GisCode's own runtime (GGUF + `llama-server`)
 
-**GisCode Core does not connect to Ollama.** This is explicit in the project's
-own architecture notes, which state that GisCode must not depend on Ollama and
-that inference goes through `llama-server` / llama.cpp directly.
-
-What this means in practice:
-
-- Pointing GisCode at Ollama's API port (`11434`) does nothing — there is no
-  setting for it, and no code path that speaks Ollama's API.
-- Models you pulled with `ollama pull` are stored in Ollama's own blob format
-  inside `~/.ollama/models`, not as `.gguf` files in a folder GisCode scans. They
-  will not appear in GisCode's model list.
-- Installing Ollama is not harmful, but it does not make GisCode work.
-
-If you want to use a model you first tried in Ollama, download the **GGUF**
-version of that model from its publisher and follow
-[section 5](#5-put-the-model-where-giscode-looks). Genuine Ollama support would
-require a new provider adapter in the application; it is not something this
-documentation changes, and it is not available in v0.1.0.
-
----
-
-## 4. LM Studio — supported through its files, not its API
-
-LM Studio is **partly** useful with GisCode, in two specific ways. It is not
-supported as a server that GisCode connects to.
-
-### What works
-
-1. **Model files.** GisCode scans LM Studio's model folders, so GGUF models you
-   downloaded in LM Studio show up in GisCode automatically:
-   - `~/.lmstudio/models`
-   - `C:\Users\Public\lmstudio\models`
-
-2. **The llama.cpp backend.** LM Studio ships `llama-server` binaries under
-   `~/.lmstudio/extensions/backends`, and GisCode searches there. If you have LM
-   Studio installed, you may already have everything you need.
-
-### What does not work
-
-- Starting LM Studio's own local server and expecting GisCode to use it. GisCode
-  does not connect to an OpenAI-compatible endpoint such as
-  `http://localhost:1234/v1`, and it has no field for one.
-- LM Studio's chat UI, presets, or per-model settings. GisCode loads the file
-  itself with its own launch options.
-
-### Option A — reuse LM Studio's backend
-
-If LM Studio is installed with at least one backend downloaded:
-
-1. Launch GisCode (`py -3.13 -m giscode.main`).
-2. Open **Model Manager** and read the backend note. It names the backend
-   GisCode resolved.
-3. If it reports no server, point GisCode at the binary explicitly. Find it
-   under `~/.lmstudio/extensions/backends` (the folder is nested a level or two
-   deep, and there may be several builds):
-
-   ```bat
-   dir /s /b "%USERPROFILE%\.lmstudio\extensions\backends\llama-server.exe"
-   ```
-
-4. Set the path for the current session, then relaunch:
-
-   ```bat
-   set GISCODE_LLAMA_SERVER_PATH=%USERPROFILE%\.lmstudio\extensions\backends\<build>\llama-server.exe
-   py -3.13 -m giscode.main
-   ```
-
-5. Confirm the binary runs on its own:
-
-   ```bat
-   "%GISCODE_LLAMA_SERVER_PATH%" --version
-   ```
-
-### Option B — install llama.cpp separately
-
-Download a Windows build of llama.cpp, then either put `llama-server.exe` on
-`PATH` or set `GISCODE_LLAMA_SERVER_PATH` to its full path as above. This is the
-more predictable option, because an LM Studio update can move or replace its
-bundled backend.
-
----
-
-## 5. Put the model where GisCode looks
+### Where the model must be
 
 GisCode discovers `.gguf` files in:
 
 | Folder | Notes |
 | --- | --- |
-| `~/.giscode/models` | Create it yourself for a GisCode-only library. |
-| `~/.lmstudio/models` | Populated by LM Studio downloads. |
+| `~/.giscode/models` | Create it for a GisCode-only library. Downloads from GisCode land here. |
+| `~/.lmstudio/models` | Populated by LM Studio. |
 | `C:\Users\Public\lmstudio\models` | LM Studio's shared folder. |
 
-To use a different folder, set `paths.models_dir` in `~/.giscode/config.json`.
-Restart GisCode after changing it.
+Or set `paths.models_dir` in `~/.giscode/config.json`. Restart after changing it.
 
-Things that stop a model from appearing:
+Things that stop a model appearing:
 
-- It is not a `.gguf` file (safetensors and `.bin` files are ignored).
-- It is in a nested LM Studio author folder that GisCode's scan reaches, but the
-  file itself is a split shard you did not complete.
-- It contains unexpected special characters in the filename.
-- You added the file while GisCode was running and did not restart.
+- it is not `.gguf` (safetensors and `.bin` are ignored);
+- it is still a `.part` download;
+- it is in a folder GisCode does not scan;
+- you added it while GisCode was running and did not restart.
 
-For vision models, GisCode also needs the matching **`mmproj`** projector file in
-the same folder. Without it, the model loads for text but attachment analysis
-reports that vision is unavailable.
+Vision models also need the matching **`mmproj`** projector file in the same
+folder.
 
----
+### Where `llama-server` must be
 
-## 6. Choose and load the model
+GisCode looks for the server in this order:
 
-1. Start GisCode.
-2. In the header, open the **Model** dropdown. It lists `Auto` plus every model
-   GisCode discovered.
-3. Pick the model you want, or leave `Auto` to let GisCode choose.
-4. Open **Model Manager** and click **Load selected model**.
-5. Watch the status line. Loading a multi-gigabyte model the first time can take
-   minutes; the status updates as it goes.
+1. `GISCODE_LLAMA_SERVER_PATH`, if it points at an existing `.exe`;
+2. `llama-server` on `PATH`;
+3. `~/.lmstudio/extensions/backends`, `C:\Program Files\llama.cpp\bin`,
+   `C:\llama.cpp\bin`.
 
-![Model Manager with a model loaded](images/model-manager.png)
+The backend note at the top of Model Manager names the one it resolved.
 
-*Model Manager after loading a model. The status line names the model and its
-state; the note line reports facts about the machine, such as CPU-only loading,
-which are not errors.*
+### Load it
 
-6. The window title changes to `Loaded: <model name>` when it is ready.
-7. **Unload current model** releases it without closing GisCode — useful when
-   switching to a larger model.
+1. **Model Manager** → choose a model in the header **Model** dropdown.
+2. **Load selected model**.
+3. Wait for `(Ready)` and the window title `Loaded: ...`.
 
-If the load fails, the error appears in red under the status line. The most
-common causes are a model larger than your memory, an incomplete download, or a
-server binary that could not start.
+Loading can take minutes the first time. A grey note about CPU-only loading
+describes the machine, not a failure.
 
 ---
 
-## 7. Test that GisCode can actually talk to the model
+## 3. Ollama provider
 
-A model that appears in the dropdown is not proof that inference works. Verify
-what this build can verify:
+GisCode talks to a running Ollama over its documented local API.
 
-1. In **Model Manager**, click **Load selected model**.
-2. Expect the status line to name the model and its state, for example
-   `Qwen3-VL-4B-Instruct-Q4_K_M (Ready) [n_ctx=16384]`, and the window title to
-   start with `Loaded:`.
-3. Confirm the log shows the server starting and the model loading:
+### Connect it
+
+1. Install Ollama and make sure it is running (`ollama serve`, or the desktop
+   app).
+2. Pull a model, for example:
 
    ```bat
-   type "%USERPROFILE%\.giscode\logs\giscode.log"
+   ollama pull qwen2.5-coder:7b
    ```
 
-   Look for `Model load succeeded` and a line naming the execution device (GPU
-   or CPU).
+3. In GisCode open **Model Manager → Local providers** and press **Refresh
+   providers**. Ollama should show `OK ... reachable, N model(s)`.
+4. In **Model profiles** choose Purpose `coding`, Provider `ollama`, pick the
+   model, then **Save profile**.
+5. Press **Test connection**, then **Test coding**.
 
-That is a completed, verified load: GisCode resolved a backend, started its own
-`llama-server`, and the server answered `/health` with a usable model.
+Default endpoint: `http://127.0.0.1:11434`.
 
-**What is not a reliable test in this build:**
+### What GisCode does and does not do with Ollama
 
-- The **Planer** (Projects tab) is where Core actually sends a request to the
-  model, but planning was slow or did not return an answer during testing for
-  this documentation. Treat a plan reply as a bonus, not the acceptance check.
-- The **Chat** tab refuses general questions with "GisCode Core cannot carry out
-  that request without GisAI." That message is about the missing GisAI engine,
-  not about your model.
+- It lists the models Ollama already has, with quantization when Ollama reports
+  it.
+- It sends chat requests to Ollama and shows Ollama's answer.
+- It does **not** download, pause, resume or delete Ollama models. `ollama pull`
+  and `ollama rm` own that, and the UI says so rather than offering buttons that
+  cannot work.
 
-If the model never becomes ready:
+If Refresh reports `-- Ollama ... Nothing is listening on that endpoint`, the
+server is not running or the port is different.
 
-- Check the Model Manager status for a load error.
-- Check the newest file in `~/.giscode/logs` for the server start line and any
-  `/health` timeout.
-- Re-check `llama-server --version` with the same binary path GisCode uses.
+---
 
-There is no separate "test connection" button, because there is no connection to
-configure: GisCode starts the server itself.
+## 4. LM Studio provider
+
+LM Studio can serve an OpenAI-compatible API from its own process, and it can
+also just be the place you downloaded a GGUF file. These are different routes:
+
+| Route | What happens | Use when |
+| --- | --- | --- |
+| **Provider** (`http://127.0.0.1:1234`) | LM Studio runs the model; GisCode sends requests to it | You want LM Studio to manage loading and memory |
+| **Files** (`~/.lmstudio/models`) | GisCode's own `llama-server` loads the GGUF | You want GisCode's context/offload controls |
+
+### Provider route
+
+1. In LM Studio, load a model and start its local server.
+2. In GisCode: **Model Manager → Local providers → Refresh providers**. LM Studio
+   should report reachable with a model count.
+3. Pick a profile provider/model and **Save profile**.
+
+GisCode does not download or delete LM Studio's models.
+
+### File route
+
+GisCode scans `~/.lmstudio/models` and `C:\Users\Public\lmstudio\models`
+automatically. Instead of loading the model in LM Studio, choose it in GisCode's
+**Model** dropdown and press **Load selected model**. GisCode may also reuse LM
+Studio's bundled `llama-server`; pin a specific build with
+`GISCODE_LLAMA_SERVER_PATH` if updates move it.
+
+---
+
+## 5. Any other OpenAI-compatible endpoint
+
+1. Start the server and note its base URL, for example
+   `http://127.0.0.1:8080`.
+2. **Model Manager → Local providers** → type a name and the URL → **Add
+   endpoint**.
+3. Press **Refresh providers** to confirm it answers and lists models.
+
+Rules that apply:
+
+- Only `http(s)` endpoints. Loopback is required unless you deliberately enable
+  a remote endpoint for that provider.
+- An API key, if the server needs one, is read from an **environment variable**
+  named in the provider's configuration. Keys are never stored in
+  `config.json` and never logged.
+- GisCode does not assume vendor extensions: it uses `/v1/models` and
+  `/v1/chat/completions` only.
+
+---
+
+## 6. Profiles, and what they do today
+
+A profile binds a **purpose** to a provider and model:
+
+| Purpose | Intended use |
+| --- | --- |
+| `coding` | Project work |
+| `reasoning` | Planning and analysis |
+| `chat` | General conversation |
+| `vision` | Attachment analysis, when supported |
+
+Actions in **Model profiles**: choose purpose/provider/model, **Save profile**,
+and the profile becomes the active one for that purpose. GisCode remembers the
+last profile that passed a test, so **a failed switch can be undone** rather than
+guessed at.
+
+**Current integration limits, stated plainly:**
+
+- A profile whose provider is `llama.cpp` also sets the existing model
+  selection, so it drives GisCode's own loader.
+- A profile pointing at Ollama, LM Studio's server or a custom endpoint is
+  recorded, listed and testable, but **Projects and Chat still run through
+  GisCode's built-in runtime** in this release. Provider-backed generation inside
+  the coding loop is not wired yet.
+- GisCode never silently substitutes a different provider or a cloud model when
+  the selected one fails.
+
+---
+
+## 7. Test that it works
+
+Two tests, deliberately separate:
+
+| Test | Question it answers | What a pass means |
+| --- | --- | --- |
+| **Test connection** | Is the provider running, is the model selectable, does a minimal request return? | The plumbing works. Nothing about quality. |
+| **Test coding** | Does the model return a parseable `add(a, b)` plus a test? | The answer is structurally usable code. |
+
+The coding test is static: the returned code is parsed with Python's `ast`, never
+executed, and nothing is written to your project.
+
+For GisCode's own runtime, the equivalent check is Model Manager reporting
+`(Ready)` plus a log line:
+
+```bat
+type "%USERPROFILE%\.giscode\logs\giscode.log"
+```
+
+Look for `Model load succeeded` and the execution device (GPU or CPU).
+
+**Known limitation:** plan generation in Projects was slow and did not reliably
+return during testing, so the Planer is not a reliable acceptance check.
 
 ---
 
 ## 8. Endpoints, ports and firewalls
 
-- The server GisCode starts listens on **loopback** (`127.0.0.1`) only. It is not
-  reachable from other machines.
-- The port is chosen by GisCode. You do not need to know it, open it, or forward
-  it.
-- **No firewall rule is required for normal use**, and you should not add an
-  inbound exception for GisCode. If a security product blocks the child process
-  from starting, allow the specific `llama-server.exe` you installed rather than
-  disabling the firewall.
-- Readiness timeout: GisCode waits for the server's `/health` endpoint, and gives
-  up after `GISCODE_LLAMA_READY_TIMEOUT` seconds (default 60). Large models on a
-  slow disk can exceed that; see
-  [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md#the-window-opens-but-no-model-can-be-loaded).
+- Provider endpoints are loopback (`127.0.0.1`) by default, and GisCode's own
+  `llama-server` listens on loopback on a port it chooses.
+- No firewall rule is required, and you should not add an inbound exception. If a
+  security product blocks a provider, allow that specific program.
+- Readiness timeout for GisCode's server: `GISCODE_LLAMA_READY_TIMEOUT` seconds
+  (default 60).
+- Remote endpoints are opt-in per provider. GisCode does not send project files
+  to a provider: a connection test sends only a one-word prompt, and the coding
+  test sends one small, self-contained request.
 
 ---
 
@@ -253,21 +231,35 @@ configure: GisCode starts the server itself.
 
 | Activity | Internet needed? |
 | --- | --- |
-| Installing GisCode's Python dependencies | Yes, once, from PyPI |
+| Installing GisCode's Python dependencies | Yes, once |
 | Downloading a model or llama.cpp build | Yes, once, from wherever you get them |
-| Installing Ollama | Not applicable — it is not used |
-| Running GisCode and chatting with a local model | **No** |
-| Attachment analysis with a local vision model | **No** |
-
-Once the pieces are on disk, GisCode works with the network disconnected.
+| `ollama pull` / LM Studio model download | Yes, once, managed by those tools |
+| Running GisCode with a local model or provider | **No** |
+| Connection and coding tests | **No** |
 
 ---
 
-## 10. Related reading
+## 10. Downloads inside GisCode
 
-- [`INSTALLATION.md`](INSTALLATION.md) — getting Python, the server and the app
-  in place.
-- [`MODEL_COMPATIBILITY.md`](MODEL_COMPATIBILITY.md) — formats, quantization,
-  memory and model choice.
-- [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — when the server or model will not
-  cooperate.
+GisCode can download a **GGUF by direct URL** into its models folder, with
+progress, pause, resume, cancel and retry. Pause/resume is real: it reconnects
+with an HTTP `Range` request, and if a server ignores `Range` the partial file is
+discarded and the download restarts rather than being stitched together.
+
+Limits, stated rather than hidden:
+
+- Only direct `http(s)` URLs. There is no built-in catalog and no invented
+  metadata.
+- Sources that require a login or a special client are not supported.
+- Deleting a downloaded model always asks for confirmation, and refuses while
+  that model is loaded.
+
+---
+
+## 11. Related reading
+
+- [`INSTALLATION.md`](INSTALLATION.md) — Python, the server and the first launch.
+- [`MODEL_COMPATIBILITY.md`](MODEL_COMPATIBILITY.md) — formats, quantization and
+  memory.
+- [`USER_GUIDE.md`](USER_GUIDE.md) — the interface.
+- [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — when a provider or model refuses.

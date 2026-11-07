@@ -3308,6 +3308,27 @@ class MainWindow:
         self.unload_model_btn = ttk.Button(buttons, text="Unload current model", command=self._unload_current_model)
         self.unload_model_btn.pack(side=tk.LEFT)
         ttk.Label(frame, text="Model loading remains owned by ModelManager and the existing deferred startup worker.", foreground="gray").pack(anchor=tk.W)
+        # Providers, profiles and the two tests are additive: the GGUF path above
+        # keeps working exactly as it did, and this section adds other local
+        # runtimes beside it. Kept in its own module so this file stays readable.
+        from giscode.gui.provider_panel import build_provider_panel
+
+        # A broken provider panel must not take the window down with it: the
+        # GGUF path above has to keep working. The failure is shown, not hidden.
+        try:
+            self._provider_panel = build_provider_panel(frame, self)
+        except Exception as _provider_exc:  # pragma: no cover - defensive
+            self._provider_panel = None
+            ttk.Label(
+                frame,
+                text=(
+                    "Provider panel unavailable: "
+                    f"{type(_provider_exc).__name__}: {_provider_exc}"
+                ),
+                foreground="red",
+                wraplength=900,
+                justify=tk.LEFT,
+            ).pack(anchor=tk.W, pady=(8, 0))
 
     def _create_project_doctor_tab(self) -> None:
         # Pro-only: the builder lives in giscode.gui.pro_tabs, which the

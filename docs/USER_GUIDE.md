@@ -200,8 +200,34 @@ the machine, not a failure.*
 - Loading can take minutes for a large model the first time.
 - Only one model is loaded at a time. Switching models unloads the previous one.
 
+### Other local servers
+
+Below the load controls, Model Manager lists local **providers**:
+
+![Model Manager with local providers and profiles](images/model-manager-providers.png)
+
+*Providers and profiles in Model Manager, plus the detected hardware line.*
+
+- **Local providers** — press **Refresh providers**. Each one reports `OK` with a
+  model count, or `--` with the reason it could not be reached. "Configured" is
+  never shown as "running".
+- **Add OpenAI-compatible endpoint** — a name and a URL. Loopback only unless you
+  enable a remote endpoint for that provider.
+- **Model profiles** — choose a **Purpose** (coding, reasoning, chat, vision), a
+  **Provider**, and a **Model**, then **Save profile**. The profile becomes active
+  for that purpose.
+- **Test connection** asks whether the provider answers at all.
+- **Test coding** asks whether the model returns usable code. It parses the answer
+  and never executes it.
+- A hardware line reports RAM and VRAM as detected.
+
+Limits worth knowing: a profile using `llama.cpp` also sets GisCode's own model
+selection, while a profile pointing at Ollama, LM Studio or a custom endpoint is
+recorded and testable but **is not yet used by Projects or Chat** — those still
+run through the built-in runtime in this release.
+
 Model files must be GGUF and in a folder GisCode scans; see
-[`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md#5-put-the-model-where-giscode-looks).
+[`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md#2-giscodes-own-runtime-gguf--llama-server).
 
 ---
 
