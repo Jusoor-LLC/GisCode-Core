@@ -9,7 +9,10 @@ much easier to review than large ones.
 2. `py -3.13 -m pip install -r requirements.txt`
 3. `py -3.13 -m pip install pytest "PyYAML>=6" "Pillow>=10"`
 
-No model, server or network access is needed for the test suite.
+No model, server or network access is needed for the test suite. For a clean
+Windows install, first run and local model setup, see
+[`docs/QUICKSTART.md`](docs/QUICKSTART.md); for failures, see
+[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
 ## Running the tests
 
@@ -53,6 +56,13 @@ py -3.13 -m pytest tests/test_core_independence.py tests/test_import_boundary.py
 Advertising: `docs/ADVERTISING.md`. No provider is integrated, the service must
 decide "no ad" for every unavailable case, and it must never open a socket to
 decide.
+
+## Reporting a problem
+
+Use the bug-report or feature-request template in the repository. Include the
+version, Windows and Python versions, the exact command, and a non-sensitive
+log excerpt. Security issues must follow [`SECURITY.md`](SECURITY.md), not a
+public issue.
 
 ## Making a change
 
