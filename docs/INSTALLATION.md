@@ -113,7 +113,7 @@ Pick whichever option is easiest for you:
 **Option A — you already use LM Studio.** LM Studio ships llama.cpp backends.
 GisCode looks in `~/.lmstudio/extensions/backends` automatically, so you may not
 need to install anything. See
-[`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md#option-a--reuse-lm-studios-backend)
+[`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md#4-lm-studio-provider)
 for the details.
 
 **Option B — install llama.cpp yourself.** Download a Windows release from the

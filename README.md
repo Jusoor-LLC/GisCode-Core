@@ -49,6 +49,9 @@ so GisCode reports them as unavailable and runs the Core tools.
   passes cannot each start a fresh full timeout.
 - Local inference through `llama-server` (llama.cpp), plus an optional hosted
   writer that is **disabled by default** (see `docs/HOSTED_WRITER.md`).
+- Multiple local providers: Ollama, LM Studio's server, and OpenAI-compatible
+  endpoints, with per-purpose model profiles, a connection test and a separate
+  coding-capability test. See [`docs/LOCAL_AI_SETUP.md`](docs/LOCAL_AI_SETUP.md).
 - Task outcomes are written to a local history and learning store.
 
 ## What does not work well, or at all
@@ -97,10 +100,14 @@ scans (`~/.giscode/models`, `~/.lmstudio/models`,
 `C:\Users\Public\lmstudio\models`, or the `paths.models_dir` setting) and a
 `llama-server` binary must be available.
 
-GisCode does **not** connect to Ollama, and it does **not** connect to LM
-Studio's local API. It reuses LM Studio's downloaded GGUF files and its bundled
-llama.cpp backend, then runs the model in its own server process. See
-[Local AI setup](docs/LOCAL_AI_SETUP.md) for the details and the limitation.
+GisCode runs a GGUF file in its own `llama-server` **or** uses another local
+server as a provider: **Ollama**, **LM Studio's local server**, or any
+OpenAI-compatible endpoint you add by URL. Providers are loopback by default and
+are selected in Model Manager, where each one reports whether it is actually
+running. The active **chat** profile answers Chat and the active **coding**
+profile plans Projects; switching takes effect on the next request without a
+restart. Chat stays read-only and edits still go through the approval diff. See
+[Local AI setup](docs/LOCAL_AI_SETUP.md).
 
 The only things that leave your machine are the ones you initiate: installing
 Python packages from PyPI, and downloading models, servers or code yourself.

@@ -200,8 +200,54 @@ the machine, not a failure.*
 - Loading can take minutes for a large model the first time.
 - Only one model is loaded at a time. Switching models unloads the previous one.
 
+### Other local servers
+
+Below the load controls, Model Manager lists local **providers**:
+
+![Model Manager with local providers and profiles](images/model-manager-providers.png)
+
+*Providers and profiles in Model Manager, plus the detected hardware line.*
+
+- **Local providers** — press **Refresh providers**. Each one reports `OK` with a
+  model count, or `--` with the reason it could not be reached. "Configured" is
+  never shown as "running".
+- **Add OpenAI-compatible endpoint** — a name and a URL. Loopback only unless you
+  enable a remote endpoint for that provider.
+- **Model profiles** — choose a **Purpose** (coding, reasoning, chat, vision), a
+  **Provider**, and a **Model**, then **Save profile**. The profile becomes active
+  for that purpose.
+- **Test connection** asks whether the provider answers at all.
+- **Test coding** asks whether the model returns usable code. It parses the answer
+  and never executes it.
+- A hardware line reports RAM and VRAM as detected.
+
+A profile is not just a label: the active **chat** profile answers the Chat tab,
+and the active **coding** profile plans the work in Projects. Switching takes
+effect on your next request — no restart. A purpose with no profile uses the
+built-in `llama.cpp` selection as before.
+
+What stays the same when a provider model is answering:
+
+- Chat is **read-only**. It can read a bounded view of the open project (a file
+  list, plus the file you name) and cannot write, run or delete anything.
+- Edits still happen in Projects, behind the approval diff. A rejected diff
+  changes nothing.
+- Requests Core refuses by contract — running tests, deleting files, committing —
+  stay refused even with a model selected.
+- If the provider is down or the model is missing, GisCode says which provider
+  and model failed and points at the last profile that worked. It does not switch
+  provider on its own.
+
+Every Chat answer ends with the provider and model that produced it, so you can
+tell which model you are talking to without opening Model Manager.
+
+![Chat answering with the active Ollama profile](images/chat-selected-model.png)
+
+*The selected profile answering a question about the open project. Chat reports
+`Files changed: 0` because it cannot write: edits belong to Projects.*
+
 Model files must be GGUF and in a folder GisCode scans; see
-[`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md#5-put-the-model-where-giscode-looks).
+[`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md#2-giscodes-own-runtime-gguf--llama-server).
 
 ---
 
@@ -215,17 +261,44 @@ Attachment**.
 2. The attachment is recorded with the conversation turn.
 3. **Analyze Attachment** asks the application to read the image.
 
-**Known limitation in this build:** there is no working image-understanding path
-in the public Core edition. Clicking **Analyze Attachment** ends with a red
-`Task failed` status and a refusal in the conversation, because the vision step
-is driven by the generative engine that this repository does not contain. A
-vision model plus its `mmproj` projector still trains nothing: the model can be
-loaded, but Core has nothing to send the image to.
+**Analyze Attachment sends the image to your selected vision model.** To set
+that up once:
 
-So: attaching images and keeping them with the conversation works; automatic
-analysis does not, and GisCode says so rather than inventing a description.
+1. Open **Model Manager** and refresh **Local providers**.
+2. Under **Model profiles**, choose **Purpose = vision**, a **Provider**
+   (`ollama`), and a model the provider reports as vision-capable
+   (`qwen2.5vl:7b`), then **Save profile**. The dropdown lists only models the
+   provider itself declares capable; GisCode does not guess from a model name.
+3. Attach an image and click **Analyze Attachment**.
 
-Privacy note: nothing is uploaded. There is no cloud call in this path.
+![Chat analysing an attached image with the vision profile](images/vision-chat.png)
+
+*A real run: `code.png` was attached and `qwen2.5vl:7b` read the code inside it.
+The footer names the provider and model and repeats that nothing was written.*
+
+- Supported formats are PNG, JPEG, WebP, BMP and GIF; images up to 16 MB.
+  Anything else is rejected **before** a request is made, with the reason shown.
+- A text-only model never receives the image. GisCode says the selection cannot
+  read images and points you at the vision profile instead of quietly answering
+  from text.
+- Attached text inside an image is treated as untrusted content by the prompt:
+  it cannot grant permissions or change GisCode's rules.
+- If no vision profile exists but your **chat** profile's model is
+  vision-capable, that model answers and the footer says so.
+- Other attachment types (PDF and similar) are not analysed by Core; the request
+  fails and states that nothing was sent.
+
+Privacy note: analysis runs on the provider you configured. A loopback provider
+means nothing leaves the machine; remote endpoints are opt-in per provider and
+the endpoint is shown in the footer.
+
+**Remote endpoints need a second, separate yes before an image is sent.** In
+Model Manager, *Allow images to be sent to remote (non-loopback) providers* is
+off by default. While it is off, a remote endpoint can answer text but an
+attached image is refused **before transmission**, with the endpoint named and
+the line `Nothing left this computer.` Turning it on is a setting you change
+deliberately; adding an endpoint or selecting a model never grants it, and
+switching to a remote provider re-checks it on the next request.
 
 ---
 
