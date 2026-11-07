@@ -215,6 +215,7 @@ def test_opt_in_acceptance_build_submits_and_writes_confined_evidence(tmp_path, 
     assert evidence.parent == root
 
 
+@pytest.mark.skipif(os.name != "nt", reason="asserts Windows path-separator refusal")
 @pytest.mark.parametrize(
     "value",
     [
@@ -298,6 +299,7 @@ def _file_symlink(link: Path, target: Path) -> bool:
         return False
 
 
+@pytest.mark.skipif(os.name != "nt", reason="junctions are Windows-only")
 def test_junction_at_the_evidence_root_is_refused(tmp_path, monkeypatch):
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -311,6 +313,7 @@ def test_junction_at_the_evidence_root_is_refused(tmp_path, monkeypatch):
     assert list(outside.iterdir()) == []
 
 
+@pytest.mark.skipif(os.name != "nt", reason="junctions are Windows-only")
 def test_directory_junction_as_the_target_name_is_refused(tmp_path, monkeypatch):
     root = tmp_path / main_module.ACCEPTANCE_EVIDENCE_ROOT
     root.mkdir(parents=True)
