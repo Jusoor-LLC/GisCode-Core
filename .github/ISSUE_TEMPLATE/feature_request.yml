@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest a focused improvement to GisCode Core
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        GisCode Core is an early-alpha, local-first Windows desktop project.
+        Explain the user problem first. Pro-only surfaces and cloud/telemetry
+        features are outside this repository's scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What can you not do today, and who is affected?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Smallest useful proposal
+      description: Describe the behavior, not an unrelated rewrite.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Chat
+        - Projects
+        - Model Manager
+        - Attachment/vision handling
+        - Settings or accessibility
+        - Installation or documentation
+        - Tests or CI
+        - Other Core behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Scope check
+      options:
+        - label: This keeps the default local-only behavior and adds no telemetry, advertising SDK, or required cloud service.
+          required: true
+        - label: This is not a request for a GisCode Pro feature.
+          required: true

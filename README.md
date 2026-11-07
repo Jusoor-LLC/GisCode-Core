@@ -8,6 +8,9 @@ required, and no account is needed.
 
 > **Status: early alpha.** This is a working research project, not a finished
 > product. It is developed and tested on Windows only. There is no installer yet.
+>
+> **New here?** Start with the [Quick start](docs/QUICKSTART.md); if startup
+> fails, use [Troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## Editions
 
@@ -79,7 +82,7 @@ so GisCode reports them as unavailable and runs the Core tools.
 ## Install and run from source
 
 ```bat
-git clone <this repository> GisCode
+git clone https://github.com/Jusoor-LLC/GisCode-Core.git GisCode
 cd GisCode
 py -3.13 -m pip install -r requirements.txt
 py -3.13 -m giscode.main
@@ -94,6 +97,10 @@ py -3.13 -m giscode.main --gui-check
 ```
 
 It exits non-zero with `GUI_CHECK_FAIL: ...` if the window cannot be built.
+
+For upgrade and manual-removal guidance, see
+[Upgrade and removal](docs/QUICKSTART.md#upgrade-and-removal). There is no
+uninstaller and no background service.
 
 ## Where GisCode looks for the server and the models
 
@@ -173,6 +180,10 @@ look in the log file under `~/.giscode/logs` when it misbehaves.
 
 ## Documentation
 
+- [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — clean Windows install, first run,
+  local model setup, upgrade and manual removal.
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — startup, Tk, model,
+  server, test and cleanup failures.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — components, control flow and
   non-negotiables.
 - [`docs/CORE_AND_PRO.md`](docs/CORE_AND_PRO.md) — what each edition contains and
