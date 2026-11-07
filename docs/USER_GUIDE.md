@@ -221,10 +221,30 @@ Below the load controls, Model Manager lists local **providers**:
   and never executes it.
 - A hardware line reports RAM and VRAM as detected.
 
-Limits worth knowing: a profile using `llama.cpp` also sets GisCode's own model
-selection, while a profile pointing at Ollama, LM Studio or a custom endpoint is
-recorded and testable but **is not yet used by Projects or Chat** — those still
-run through the built-in runtime in this release.
+A profile is not just a label: the active **chat** profile answers the Chat tab,
+and the active **coding** profile plans the work in Projects. Switching takes
+effect on your next request — no restart. A purpose with no profile uses the
+built-in `llama.cpp` selection as before.
+
+What stays the same when a provider model is answering:
+
+- Chat is **read-only**. It can read a bounded view of the open project (a file
+  list, plus the file you name) and cannot write, run or delete anything.
+- Edits still happen in Projects, behind the approval diff. A rejected diff
+  changes nothing.
+- Requests Core refuses by contract — running tests, deleting files, committing —
+  stay refused even with a model selected.
+- If the provider is down or the model is missing, GisCode says which provider
+  and model failed and points at the last profile that worked. It does not switch
+  provider on its own.
+
+Every Chat answer ends with the provider and model that produced it, so you can
+tell which model you are talking to without opening Model Manager.
+
+![Chat answering with the active Ollama profile](images/chat-selected-model.png)
+
+*The selected profile answering a question about the open project. Chat reports
+`Files changed: 0` because it cannot write: edits belong to Projects.*
 
 Model files must be GGUF and in a folder GisCode scans; see
 [`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md#2-giscodes-own-runtime-gguf--llama-server).

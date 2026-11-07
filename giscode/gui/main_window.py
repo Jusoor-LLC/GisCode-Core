@@ -2042,12 +2042,50 @@ class MainWindow:
                 # Core edits ask the same person through the same
                 # thread-safe queue the engine-backed path uses.
                 approve=self._approve_edit,
+                model_router=self._selected_model_router("chat"),
             )
         except Exception as exc:  # never let a dispatcher bug look like success
             self._worker_results[epoch] = (None, exc, epoch, task)
             return
         task.status = str(result.get("status") or "failed")
         self._worker_results[epoch] = (result, None, epoch, task)
+
+    def _selected_model_router(self, purpose: str = "coding"):
+        """The router over the profile selected in Model Manager.
+
+        Read lazily and cached per purpose: switching a profile in Model
+        Manager must take effect on the next request, without restarting the
+        application and without a second registry or profile store.
+        """
+        cached = getattr(self, "_model_router_cache", None)
+        if cached is not None and getattr(cached, "purpose", None) == purpose:
+            return cached
+
+        window = self
+
+        class _Source:
+            def get(self, key, default=None):
+                return window._settings_get(key, default)
+
+            def set(self, key, value) -> None:
+                if not window._settings_set(key, value):
+                    raise RuntimeError("settings are not writable")
+
+            def save(self) -> None:
+                # ``_settings_set`` already persisted the value; nothing is
+                # buffered. The provider layer requires the method to exist, so
+                # the adapter must offer it or it is not a settings source.
+                return None
+
+        from giscode.inference.router import ModelRouter
+
+        builtin = getattr(self, "_inference", None) or getattr(self, "inference", None)
+        try:
+            router = ModelRouter(builtin=builtin, settings=_Source(), purpose=purpose)
+        except Exception:
+            return None
+        self._model_router_cache = router
+        return router
 
     def _remaining_task_budget(self) -> Optional[float]:
         """Time left on the task clock, or None when no budget was started."""

@@ -482,6 +482,40 @@ def _verify_read_back(target: Path, expected: str) -> tuple[bool, dict]:
     return ok, verification
 
 
+def _model_selected(router) -> bool:
+    """True when a profile or a legacy model setting actually names a model.
+
+    With nothing selected, Core keeps its existing refusal: a user who has not
+    chosen a model should read the contract, not "provider unreachable".
+    """
+    if router is None:
+        return False
+    target_fn = getattr(router, "active_target", None)
+    if not callable(target_fn):
+        return True
+    try:
+        target = target_fn()
+    except Exception:
+        return False
+    return bool(getattr(target, "profile_id", "") or getattr(target, "model", ""))
+
+
+def _should_ask_the_model(status: str, capability: str, router) -> bool:
+    """Route only the two cases a model can answer honestly.
+
+    ``pro_only`` and a named ``unsupported`` capability (run the tests, delete a
+    file, commit) stay refused even with a model connected: connecting a model
+    must never widen what Core is allowed to touch.
+    """
+    if status == capabilities.PRO_ONLY:
+        return False
+    if status not in (capabilities.MODEL_REQUIRED, capabilities.UNSUPPORTED):
+        return False
+    if status == capabilities.UNSUPPORTED and capability != "unknown":
+        return False
+    return _model_selected(router)
+
+
 def execute_request(
     message: str,
     project_root: str,
@@ -491,6 +525,8 @@ def execute_request(
     deadline_s: Optional[float] = None,
     clock: Callable[[], float] = time.monotonic,
     approve: Optional[Callable[[Path, str], bool]] = None,
+    model_router: Optional[object] = None,
+    model_purpose: str = "chat",
 ) -> dict:
     """Run one supported deterministic request in *project_root*.
 
@@ -516,10 +552,24 @@ def execute_request(
         check()
         operation = parse_request(message)
     except Refused as exc:
+        capability = getattr(exc, "capability", "unknown")
+        status = getattr(exc, "status", capabilities.UNSUPPORTED)
+        if _should_ask_the_model(status, capability, model_router):
+            from giscode.agentic.model_chat import answer_with_model
+
+            return answer_with_model(
+                message,
+                project_root,
+                router=model_router,
+                task_id=task_id,
+                should_cancel=cancelled,
+                deadline_s=deadline_s,
+                purpose=model_purpose,
+            )
         return _refused(
             task_id,
-            getattr(exc, "capability", "unknown"),
-            getattr(exc, "status", capabilities.UNSUPPORTED),
+            capability,
+            status,
             str(exc),
         )
     except TaskCancelled as exc:

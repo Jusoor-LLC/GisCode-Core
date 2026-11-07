@@ -104,7 +104,10 @@ GisCode runs a GGUF file in its own `llama-server` **or** uses another local
 server as a provider: **Ollama**, **LM Studio's local server**, or any
 OpenAI-compatible endpoint you add by URL. Providers are loopback by default and
 are selected in Model Manager, where each one reports whether it is actually
-running. See [Local AI setup](docs/LOCAL_AI_SETUP.md).
+running. The active **chat** profile answers Chat and the active **coding**
+profile plans Projects; switching takes effect on the next request without a
+restart. Chat stays read-only and edits still go through the approval diff. See
+[Local AI setup](docs/LOCAL_AI_SETUP.md).
 
 The only things that leave your machine are the ones you initiate: installing
 Python packages from PyPI, and downloading models, servers or code yourself.

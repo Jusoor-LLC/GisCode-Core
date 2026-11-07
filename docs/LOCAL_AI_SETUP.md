@@ -174,16 +174,41 @@ and the profile becomes the active one for that purpose. GisCode remembers the
 last profile that passed a test, so **a failed switch can be undone** rather than
 guessed at.
 
-**Current integration limits, stated plainly:**
+**What the active profile actually drives:**
 
-- A profile whose provider is `llama.cpp` also sets the existing model
-  selection, so it drives GisCode's own loader.
-- A profile pointing at Ollama, LM Studio's server or a custom endpoint is
-  recorded, listed and testable, but **Projects and Chat still run through
-  GisCode's built-in runtime** in this release. Provider-backed generation inside
-  the coding loop is not wired yet.
-- GisCode never silently substitutes a different provider or a cloud model when
-  the selected one fails.
+| Purpose | Where it is used |
+| --- | --- |
+| `chat` | The **Chat** tab: questions, code discussion, explanations |
+| `coding` | **Projects**: planning and the edits you approve |
+| `reasoning` | Recorded and testable; Projects currently plans with the `coding` model |
+| `vision` | Attachments, only for a model the provider reports as vision-capable |
+
+A purpose with no profile uses GisCode's built-in `llama.cpp` selection, exactly
+as before. Switching the active profile takes effect on your **next** request -
+no restart, no reinstall.
+
+Two boundaries that do not move:
+
+- **Chat is read-only.** The model may read a bounded view of the open project
+  (a file list, plus the file you name), and it cannot create, edit, run or
+  delete anything. A change is made in Projects, where you review a diff and
+  approve it.
+- **Connecting a model does not widen Core's permissions.** A request Core
+  refuses by contract - running tests, deleting files, committing - stays
+  refused even with a model selected.
+
+When the selected provider or model cannot answer, GisCode names both and offers
+the last selection that worked. It never silently switches provider, and never
+falls back to a cloud model.
+
+To make an Ollama model the one Projects uses, save a profile with purpose
+**coding**; to make it answer Chat, save one with purpose **chat**.
+
+![Chat answering through the active Ollama profile](images/chat-selected-model.png)
+
+*Chat answering through the active `chat` profile (Ollama, `llama3.2:latest`).
+The reply is the model's own text, it ends with the provider and model that
+produced it, and the change summary confirms nothing was written.*
 
 ---
 
@@ -208,8 +233,11 @@ type "%USERPROFILE%\.giscode\logs\giscode.log"
 
 Look for `Model load succeeded` and the execution device (GPU or CPU).
 
-**Known limitation:** plan generation in Projects was slow and did not reliably
-return during testing, so the Planer is not a reliable acceptance check.
+**What a successful plan depends on:** the model, not the wiring. A 3B model
+driving the Planner produced a valid single-step plan in under a second in
+testing, while a larger model takes longer and a weak one may return nothing
+usable. When the reply cannot be parsed, GisCode reports that and leaves the plan
+untouched - it does not invent steps to look successful.
 
 ---
 
