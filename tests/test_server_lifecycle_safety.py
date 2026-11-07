@@ -375,6 +375,7 @@ def test_a_foreign_server_is_not_in_the_sessions_process_tree(tmp_path):
         _reap_dummies(tmp_path)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="uses Windows executables as dummy servers")
 def test_a_failing_test_still_gets_its_own_server_stopped(tmp_path):
     try:
         result, work = _run_nested_session(
@@ -393,6 +394,7 @@ def test_a_failing_test_still_gets_its_own_server_stopped(tmp_path):
         _reap_dummies(tmp_path)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="uses Windows executables as dummy servers")
 def test_keep_llama_server_still_stops_the_sessions_own_server(tmp_path):
     """``GISCODE_KEEP_LLAMA_SERVER=1`` is not an escape from our own cleanup.
 
