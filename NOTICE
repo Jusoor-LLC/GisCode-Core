@@ -1,0 +1,54 @@
+GisCode
+Copyright 2026 Jusoor Company LLC
+
+This product includes software developed at Jusoor Company LLC.
+
+GisCode Core is licensed under the Apache License, Version 2.0. A copy of the
+licence is in the LICENSE file. Nothing in that licence grants trademark or
+branding rights in the GisCode name or the Gis logo. No trademark ownership,
+registration, or legal protection is asserted by this notice; see TRADEMARK.md.
+
+This file also lists the third-party components GisCode uses, depends on, or
+refers to by name. It is not a licence for those components, and it is not a
+legal audit: the versions you install carry their own licence files, which
+govern.
+
+1. llama.cpp / llama-server — NOT BUNDLED
+   GisCode drives a `llama-server` binary that the user installs separately.
+   llama.cpp is Copyright (c) 2023-2026 Georgi Gerganov and contributors and is
+   distributed under the MIT License. No llama.cpp source or binary is included
+   in this repository; obtain it from https://github.com/ggml-org/llama.cpp and
+   keep its licence file with your copy.
+
+2. Python runtime libraries
+   - psutil — BSD 3-Clause (required). The installed 7.2.2 metadata declares no
+     non-extra runtime dependencies. https://github.com/giampaolo/psutil
+   - pywebview — BSD 3-Clause (optional, native browser windows). On Windows it
+     can add pythonnet; its declared dependencies include bottle, proxy_tools
+     and typing_extensions. Each remains under its own licence.
+   - PyYAML — MIT (optional, audit checklists). The installed 6.0.3 metadata
+     declares no runtime dependencies.
+   - Pillow — MIT-CMU (optional, image input). The Pillow 12.3.0 LICENSE text
+     uses the MIT-CMU License; the installed metadata reports MIT-CMU.
+   - llama-cpp-python — MIT (optional, in-process GGUF runtime). It declares
+     typing-extensions, numpy, diskcache and jinja2; each remains under its own
+     licence.
+   These are installed by the user with pip; the licences above are those of the
+   upstream projects and should be confirmed against the version you install.
+
+3. Python, Tcl/Tk
+   GisCode runs on Python 3.13 and uses tkinter, which links Tcl/Tk. Both are
+   distributed under the PSF and Tcl/Tk licences respectively and are provided
+   by your Python installation.
+
+4. Names referred to without affiliation
+   GisCode can talk to, import from, or document interoperability with products
+   and services owned by other companies, including Ollama, LM Studio, OpenCode
+   Zen, Anthropic Claude, OpenAI GPT, Firebase, Stripe, Apple Xcode and xtool.
+   All trademarks belong to their owners. Reference to them does not imply
+   endorsement, sponsorship, or any partnership.
+
+5. Artwork
+   The Gis logo files under `giscode/assets/` are included project artwork. No
+   trademark ownership, registration, or branding rights are asserted by this
+   notice; see TRADEMARK.md.

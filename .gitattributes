@@ -1,0 +1,14 @@
+# Public GisCode Core: text files are LF in the repository and in every working
+# copy, so what a contributor clones is byte-for-byte what the exporter wrote.
+# The private development tree keeps its own line endings; this file is only
+# written into the export.
+* text=auto eol=lf
+
+# Real binaries: never normalise, never diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gguf binary

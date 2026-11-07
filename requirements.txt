@@ -1,0 +1,10 @@
+# Runtime dependencies for GisCode.
+# Python 3.13 with tkinter is required separately (see README).
+psutil>=7
+
+# Optional, imported lazily only when the feature is used:
+#   pywebview  - native browser windows for developer-release previews
+#   PyYAML     - audit checklists (giscode/gisai/audit/runner.py)
+#   Pillow     - reading attached images (giscode/vision/images.py)
+#   llama-cpp-python - in-process GGUF runtime instead of llama-server
+# Install one with e.g.  py -3.13 -m pip install "PyYAML>=6"

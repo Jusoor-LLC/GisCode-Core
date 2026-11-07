@@ -1,0 +1,76 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+*.log
+/workspace/
+
+# Tooling caches and coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.coverage
+htmlcov/
+
+# Packaged and generated artifacts
+*.zip
+*.odt
+*.bak
+*.orig
+*.rej
+GisCode_new/
+new fresh GisCode/
+
+# Databases and local runtime state
+.giscode/
+capabilities.json*
+
+# Models are never committed (GGUF files are multi-gigabyte assets)
+*.gguf
+*.GGUF
+
+# Local backup folders
+GisCode_Backups/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Model weights
+*.gguf
+*.ggml
+
+# Secrets and credentials (note: .env.example stays tracked on purpose)
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+.netrc
+credentials.json
+secrets.json
+
+# Secret-scanning fixture: every value is an obviously fake string
+# (fake_fixture_*), used only to test detection and redaction. It must stay
+# tracked so those tests work on a fresh clone.
+!giscode/gisai/inspection/test_fixtures/secret_project/.env
+
+# Log directories
+logs/
+
+# GUI/verification evidence and scratch workspaces
+_physical_gui_evidence/
+_task3f*_evidence/
+task3f_workspace/
+tests/tmp_debug_test/
+
+# Very large captured output dumps
+probe_run_*.txt
+test_output.txt

@@ -1,0 +1,51 @@
+name: Core CI
+
+# Validates the public Core edition on a clean machine: no GPU, no model, no
+# LM Studio or Ollama, no API key and no Pro source. If a change starts to need
+# one of those to pass, the workflow fails instead of quietly becoming
+# unrunnable for a contributor.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / python 3.13
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      GISCODE_HOME: ${{ github.workspace }}/.ci-giscode-home
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # Tk is part of the standard library but is packaged separately on Linux.
+      - name: Install Tk (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+
+      - name: Test
+        run: python -m pytest tests --ignore=tests/fixtures -q
+
+      - name: GUI startup check (Windows)
+        if: runner.os == 'Windows'
+        run: python -m giscode.main --gui-check
+
+      - name: GUI startup check (Linux, headless)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python -m giscode.main --gui-check

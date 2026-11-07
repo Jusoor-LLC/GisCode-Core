@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "giscode"
+version = "0.1.0"
+description = "GisCode - local-first AI coding agent"
+# Public Core licensing is recorded in LICENSE and NOTICE. The private source
+# tree is not relicensed by this file; the export declares Apache-2.0.
+license = { text = "Apache-2.0" }
+requires-python = ">=3.13"
+dependencies = [
+    "psutil>=7",
+]
+
+[project.optional-dependencies]
+# Imported lazily, only when the corresponding feature is used.
+webview = ["pywebview>=4"]
+yaml = ["PyYAML>=6"]
+images = ["Pillow>=10"]
+llama-cpp = ["llama-cpp-python>=0.2"]
+test = [
+    "pytest>=8",
+    "PyYAML>=6",
+    "Pillow>=10",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
