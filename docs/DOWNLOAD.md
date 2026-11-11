@@ -76,13 +76,18 @@ Get-FileHash .\GisCodeSetup.exe -Algorithm SHA256
 
 Compare with the value published in the release notes:
 
-| File | SHA-256 |
+| File | SHA-256 (qualification build) |
 |---|---|
-| `GisCodeSetup.exe` | `f0d1cd5a23d858fc5e96b113a0d1da002fa45dec1094391603334013f28108f8` |
-| `GisCode.exe` | `af2afefdd933950b6265fc9c12ce9550399c24e96033f4772b07c60026f86475` |
+| `GisCodeSetup.exe` | `94232d8af53f1e93cf1fe0110c1dc3ef786bc5a15a16683e41e363cd5efa6705` |
+| `GisCode.exe` | `72eae67a5f38b59b4c91b72df2a61f69a10c145a05ec45c22f4ea26ccd920435` |
 
-Hashes identify the files as built from the tagged commit; the build is not
-byte-for-byte reproducible, so they cannot be regenerated from source alone.
+These are **qualification hashes** for the locked 0.1.1 build that passed the
+release checks on the owner's machine. They are **not** evidence that a
+downloadable asset has been published: no release asset exists yet. The files
+attached to `Releases → v0.1.1` will be produced by the trusted release
+workflow from the tagged commit; publish *their* hashes here (and in the release
+notes) before pointing anyone at the download. The build is not byte-for-byte
+reproducible, so hashes cannot be regenerated from source alone.
 Build instructions are in [`BUILD_AND_RELEASE.md`](BUILD_AND_RELEASE.md).
 
 ## Security and privacy

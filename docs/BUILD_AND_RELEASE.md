@@ -9,7 +9,7 @@ checkout. The build is Windows-only.
 |---|---|
 | Python | 3.13.15 (64-bit, from python.org; tkinter included) |
 | PyInstaller | 6.22.2 |
-| Runtime/build dependencies | `requirements-lock.txt` — 15 packages, every one pinned with a SHA-256 (`py -3.13 -m pip install --require-hashes --no-deps -r requirements-lock.txt`) |
+| Runtime/build dependencies | `requirements-lock.txt` — 18 packages, every one pinned with a SHA-256 (`py -3.13 -m pip install --require-hashes --no-deps -r requirements-lock.txt`) |
 | Optional build-time extra | `pyproject.toml` extras: `test`, `webview`, `yaml`, `images` |
 
 `pyproject.toml` requires Python `>=3.13`. No other build tool, signing key or

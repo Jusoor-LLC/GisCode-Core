@@ -766,6 +766,20 @@ class MainWindow(QueueHost):
         )
         self.header_stop_btn.pack(side=tk.RIGHT, padx=(8, 0))
 
+        # 1 100 px is a design minimum, not a measurement. Font metrics differ
+        # between platforms, so the floor is raised to whatever this platform's
+        # header actually needs; otherwise the window can be resized to a width
+        # at which its own controls are clipped (Linux fonts are wider than the
+        # Windows ones the 1 100 px figure was measured with).
+        self.root.update_idletasks()
+        header_floor = max(
+            int(header.winfo_reqwidth()),
+            int(brand_row.winfo_reqwidth()),
+            int(task_row.winfo_reqwidth()),
+        )
+        self._header_floor = max(1100, header_floor + 40)
+        self.root.minsize(self._header_floor, 700)
+
         # ===== MAIN CONTENT: RAIL + ONE NOTEBOOK =====
         body = ttk.Frame(outer, style="Gis.TFrame")
         body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(10, 8))
@@ -3673,34 +3687,6 @@ class MainWindow(QueueHost):
         self.vision_status_var.set("Analyzing image...")
         self._send_task()
 
-    def _on_terminal_run(self) -> None:
-        cmd = self._terminal_input_var.get().strip()
-        if not cmd:
-            return
-        self._terminal_input_var.set("")
-        self._terminal_output.config(state=tk.NORMAL)
-        self._terminal_output.insert(tk.END, f"$ {cmd}\n")
-        self._terminal_output.config(state=tk.DISABLED)
-        self._terminal_output.see(tk.END)
-
-        # Run command in background
-        def run_cmd():
-            import subprocess
-            try:
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30, cwd=".")
-                output = result.stdout
-                if result.stderr:
-                    output += "\n" + result.stderr
-            except subprocess.TimeoutExpired:
-                output = "Command timed out"
-            except Exception as e:
-                output = f"Error: {e}"
-
-            self.root.after(0, lambda: self._append_terminal_output(output))
-
-        import threading
-        threading.Thread(target=run_cmd, daemon=True).start()
-
     def _append_terminal_output(self, output: str) -> None:
         self._terminal_output.config(state=tk.NORMAL)
         self._terminal_output.insert(tk.END, output + "\n")
@@ -5518,7 +5504,11 @@ class MainWindow(QueueHost):
         def run_cmd():
             import subprocess
             try:
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30, cwd=".")
+                context = getattr(self, "_active_project_context", None)
+                workdir = getattr(context, "root_path", None) or "."
+                result = subprocess.run(
+                    cmd, shell=True, capture_output=True, text=True, timeout=30, cwd=workdir
+                )
                 output = result.stdout
                 if result.stderr:
                     output += "\n" + result.stderr

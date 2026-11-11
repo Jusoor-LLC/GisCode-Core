@@ -109,6 +109,8 @@ def test_junction_escape_is_refused_if_the_host_supports_junctions(tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
     junction = project / "junction"
+    if not sys.platform.startswith("win"):
+        pytest.skip("junctions are a Windows filesystem feature")
     completed = subprocess.run(
         ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
         capture_output=True,

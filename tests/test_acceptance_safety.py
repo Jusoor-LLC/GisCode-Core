@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 
 import pytest
 
@@ -125,6 +126,9 @@ def test_traversal_string_cannot_escape_into_the_real_profile(layout):
     profile = real / ".giscode"
     profile.mkdir()
     (profile / MARKER_NAME).write_text(TOKEN, encoding="utf-8")
+    # The traversal must reach the profile check: the intermediate directory
+    # has to exist for the path to resolve to the real profile on every OS.
+    (temp / "nested").mkdir()
     sneaky = temp / "nested" / ".." / ".." / "Users" / "Real" / ".giscode"
 
     with pytest.raises(DisposableHomeError, match="real user profile"):
@@ -169,6 +173,8 @@ def test_reparse_point_home_is_refused(layout):
     target.mkdir()
     (target / MARKER_NAME).write_text(TOKEN, encoding="utf-8")
     link = temp / "junction-home"
+    if not sys.platform.startswith("win"):
+        pytest.skip("junctions are a Windows filesystem feature")
     created = subprocess.run(
         ["cmd", "/c", "mklink", "/J", str(link), str(target)],
         capture_output=True,
@@ -215,6 +221,8 @@ def test_remove_tree_never_follows_a_link_out(layout):
     outside.mkdir()
     (outside / "important.txt").write_text("keep", encoding="utf-8")
     link = home / "linked"
+    if not sys.platform.startswith("win"):
+        pytest.skip("junctions are a Windows filesystem feature")
     created = subprocess.run(
         ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
         capture_output=True,

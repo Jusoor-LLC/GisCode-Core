@@ -36,6 +36,7 @@ from giscode.providers.chatgpt_auth import (
     LoopbackCallbackServer,
     generate_pkce,
 )
+from giscode.providers.credentials import MemoryCredentialStore, WindowsDpapiStore
 from giscode.providers.chatgpt_plan import (
     ChatGPTPlanProvider,
     configure_chatgpt_profile,
@@ -421,8 +422,63 @@ class _Server:
         self.httpd.server_close()
 
 
+class _TestFileStore:
+    """A test-only on-disk secret store, portable across operating systems.
+
+    It keeps the production contract (one ``<name>.bin`` per secret inside the
+    account directory) without Windows DPAPI, so persistence across processes
+    and rotation semantics are exercised on Linux too. It is deliberately not
+    a production store: the encrypted-at-rest property is covered by the
+    Windows-only DPAPI test below.
+    """
+
+    available = True
+    read_only = False
+
+    def __init__(self, directory) -> None:
+        self._directory = Path(directory)
+        self._directory.mkdir(parents=True, exist_ok=True)
+
+    def _path(self, name):
+        safe = "".join(ch for ch in str(name) if ch.isalnum() or ch in "-_") or "secret"
+        return self._directory / (safe + ".bin")
+
+    def get(self, name, default=""):
+        path = self._path(name)
+        return path.read_text(encoding="utf-8") if path.is_file() else default
+
+    def set(self, name, value):
+        self._path(name).write_text(str(value), encoding="utf-8")
+
+    def delete(self, name):
+        try:
+            self._path(name).unlink()
+        except FileNotFoundError:
+            pass
+
+    def has(self, name):
+        return bool(self.get(name))
+
+
+def _test_file_store(directory) -> _TestFileStore:
+    return _TestFileStore(directory)
+
+
 def _store(root, server) -> ChatGPTAccountStore:
-    return ChatGPTAccountStore(root, issuer=server.base, retry_delay=0.0)
+    """A store for protocol tests, independent of the host platform.
+
+    Sign-in, rotation, isolation and streaming are not Windows-specific, so the
+    secret store is injected here: a real DPAPI store only exists on Windows,
+    and these tests must exercise the same protocol on Linux. The production
+    factory (WindowsDpapiStore, fail-closed elsewhere) is covered separately by
+    test_default_secret_store_matches_the_platform.
+    """
+    return ChatGPTAccountStore(
+        root,
+        issuer=server.base,
+        retry_delay=0.0,
+        secret_store_factory=_test_file_store,
+    )
 
 
 def _sign_in(store: ChatGPTAccountStore, server: _Server, *, email: str = "") -> object:
@@ -518,7 +574,7 @@ def test_loopback_listener_accepts_only_the_callback_path():
 # --------------------------------------------------------------------------- #
 # Sign-in outcomes
 # --------------------------------------------------------------------------- #
-def test_successful_mock_sign_in_stores_identity_and_protected_tokens(tmp_path):
+def test_successful_mock_sign_in_stores_identity_and_keeps_tokens_out_of_metadata(tmp_path):
     with _Server() as server:
         store = _store(tmp_path, server)
         account = _sign_in(store, server)
@@ -534,8 +590,8 @@ def test_successful_mock_sign_in_stores_identity_and_protected_tokens(tmp_path):
         assert "at-" not in metadata
         assert "rt-" not in metadata
         assert "eyJ" not in metadata
-        blob = (store.root / "accounts" / account.account_id / "tokens.bin").read_bytes()
-        assert b"rt-" not in blob
+        # Token material belongs to the secret store, never to the metadata file.
+        assert (store.root / "accounts" / account.account_id / "tokens.bin").is_file()
         # A token that is still valid is used without a refresh request.
         token = store.access_token(account.account_id)
         assert token.startswith("at-")
@@ -1369,6 +1425,35 @@ sys.path.insert(0, os.getcwd())
 from giscode.providers.chatgpt_auth import ChatGPTAccountStore
 
 
+class _FileStore:
+    available = True
+    read_only = False
+
+    def __init__(self, directory):
+        self._directory = Path(directory)
+        self._directory.mkdir(parents=True, exist_ok=True)
+
+    def _path(self, name):
+        safe = "".join(ch for ch in str(name) if ch.isalnum() or ch in "-_") or "secret"
+        return self._directory / (safe + ".bin")
+
+    def get(self, name, default=""):
+        path = self._path(name)
+        return path.read_text(encoding="utf-8") if path.is_file() else default
+
+    def set(self, name, value):
+        self._path(name).write_text(str(value), encoding="utf-8")
+
+    def delete(self, name):
+        try:
+            self._path(name).unlink()
+        except FileNotFoundError:
+            pass
+
+    def has(self, name):
+        return bool(self.get(name))
+
+
 def fake_http(url, *, method="GET", fields=None, headers=None, timeout=20.0):
     counter_path = Path(counter)
     try:
@@ -1395,7 +1480,8 @@ while not Path(gate).exists():
         raise SystemExit("gate timeout")
     time.sleep(0.02)
 
-store = ChatGPTAccountStore(root, issuer=issuer, timeout=5.0, http_json=fake_http)
+store = ChatGPTAccountStore(root, issuer=issuer, timeout=5.0, http_json=fake_http,
+                            secret_store_factory=_FileStore)
 print("TOKEN:" + store.access_token(account_id), flush=True)
 '''
 
@@ -1459,3 +1545,37 @@ def test_two_process_refresh_rotates_once_and_agrees(tmp_path):
         assert tokens[0] == tokens[1]
         assert counter.read_text(encoding="utf-8") == "1"
         assert store.access_token(account.account_id) == tokens[0]
+
+
+# --------------------------------------------------------------------------- #
+# The production secret store, on whichever platform this is
+# --------------------------------------------------------------------------- #
+def test_default_secret_store_matches_the_platform(tmp_path):
+    """DPAPI on Windows; an explicit refusal (never plaintext) elsewhere."""
+    if WindowsDpapiStore.available:
+        store = ChatGPTAccountStore._default_secret_store(tmp_path)
+        assert isinstance(store, WindowsDpapiStore)
+        assert store.read_only is False
+    else:
+        with pytest.raises(CredentialStoreError, match="No protected credential store"):
+            ChatGPTAccountStore._default_secret_store(tmp_path)
+
+
+@pytest.mark.skipif(
+    not WindowsDpapiStore.available, reason="DPAPI ciphertext is a Windows property"
+)
+def test_sign_in_ciphertext_never_contains_plaintext_tokens(tmp_path):
+    """The real store keeps tokens unreadable without the Windows user key."""
+    with _Server() as server:
+        store = ChatGPTAccountStore(
+            tmp_path,
+            issuer=server.base,
+            retry_delay=0.0,
+            secret_store_factory=lambda directory: WindowsDpapiStore(directory),
+        )
+        account = _sign_in(store, server)
+        blob = (store.root / "accounts" / account.account_id / "tokens.bin").read_bytes()
+        assert blob
+        assert b"rt-" not in blob
+        assert b"eyJ" not in blob
+        assert store.access_token(account.account_id).startswith("at-")

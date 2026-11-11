@@ -123,9 +123,10 @@ def test_every_edition_tab_has_a_real_builder(tk_root):
 
 def test_compact_window_keeps_primary_controls_reachable(tk_root):
     window = MainWindow(tk_root)
-    tk_root.geometry("1100x700")
+    tk_root.geometry("%dx%d" % tk_root.minsize())
     tk_root.deiconify()
     window._select_tab("Chat")
+    tk_root.update_idletasks()
     tk_root.update()
     try:
         assert window.send_task_btn.winfo_ismapped()

@@ -65,7 +65,10 @@ jobs:
       - name: Install locked build dependencies
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
+          # The pip shipped with the pinned interpreter is used as-is: an
+          # unpinned self-upgrade would put a moving dependency in the middle
+          # of a build that is otherwise fixed by SHA-256.
+          python -m pip --version
           # --require-hashes rejects any artifact whose SHA-256 is not in the
           # lock, and --no-deps forbids installing anything outside it.
           python -m pip install --require-hashes --no-deps -r requirements-lock.txt
@@ -104,12 +107,18 @@ jobs:
       - name: Verify metadata, embedding and hashes; write provenance
         shell: pwsh
         run: |
+          # The version comes from the single authoritative source
+          # (windows_version.release_version), so a release bump cannot leave a
+          # stale literal behind; the verifier still fails on any mismatch.
+          $version = (python -c "import windows_version; print(windows_version.release_version())").Trim()
+          if (-not $version) { throw "the source declared no release version" }
+          Write-Output "verifying version $version"
           python packaging/verify_release_artifacts.py `
             --dist "$env:GISCODE_BUILD_ROOT/dist" `
             --acceptance "$env:GISCODE_BUILD_ROOT/dist-acceptance" `
             --installer "$env:GISCODE_BUILD_ROOT/dist-installer" `
             --provenance "$env:GISCODE_BUILD_ROOT/provenance/release-provenance.json" `
-            --require-version "0.1.1"
+            --require-version $version
 
       - name: Upload unsigned artifacts and provenance
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -58,22 +58,27 @@ def window(tk_root):
 
 def test_the_window_refuses_to_shrink_below_the_usable_minimum(window, tk_root):
     _show(tk_root, 1400, 900)
-    assert tk_root.minsize() == (1100, 700)
-    assert tk_root.wm_minsize() == (1100, 700)
+    # The floor is the design minimum, raised when this platform's font metrics
+    # need more room for the header. It must never be below the design minimum.
+    floor = tk_root.minsize()
+    assert floor[1] == 700
+    assert floor[0] >= 1100
+    assert tk_root.wm_minsize() == floor
+    assert window._header_floor == floor[0]
 
     tk_root.geometry("900x600")
     tk_root.update()
-    assert tk_root.winfo_width() >= 1100
-    assert tk_root.winfo_height() >= 700
+    assert tk_root.winfo_width() >= floor[0]
+    assert tk_root.winfo_height() >= floor[1]
 
     tk_root.geometry("100x100")
     tk_root.update()
-    assert tk_root.winfo_width() >= 1100
-    assert tk_root.winfo_height() >= 700
+    assert tk_root.winfo_width() >= floor[0]
+    assert tk_root.winfo_height() >= floor[1]
 
 
 def test_every_header_control_is_usable_at_the_minimum_size(window, tk_root):
-    _show(tk_root, 1100, 700)
+    _show(tk_root, *tk_root.minsize())
     buttons = _buttons(tk_root)
 
     missing = [label for label in HEADER_CONTROLS if label not in buttons]
@@ -89,6 +94,7 @@ def test_every_header_control_is_usable_at_the_minimum_size(window, tk_root):
 
     # The Chat row is the one place a running task can be stopped.
     window._select_tab("Chat")
+    tk_root.update_idletasks()
     tk_root.update()
     for name, widget in (("Send", window.send_task_btn), ("Stop", window.revoke_btn)):
         assert widget.winfo_ismapped(), "%s is not visible at the minimum size" % name
