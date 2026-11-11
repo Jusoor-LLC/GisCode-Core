@@ -39,6 +39,21 @@ from giscode.providers.registry import ProviderRegistry
 from giscode.providers.settings_adapter import as_settings_source
 
 
+def purpose_for_surface(*, has_image: bool = False, coding_surface: bool = True) -> str:
+    """The profile purpose a GUI surface must resolve.
+
+    The project workspace is a coding surface, so it asks for the ``coding``
+    profile; images go through the ``vision`` profile. Asking for ``chat`` from
+    the workspace silently ignored a configured coding provider and fell back to
+    the built-in llama.cpp runtime, which then had no model loaded. Keeping the
+    rule here makes it one testable decision instead of a literal at a call
+    site.
+    """
+    if has_image:
+        return "vision"
+    return "coding" if coding_surface else "chat"
+
+
 @dataclass(frozen=True)
 class Target:
     """Where a request will actually go."""
@@ -97,7 +112,7 @@ class ModelRouter:
         self._registry = registry or ProviderRegistry(source)
         self._profiles = profiles or ProfileStore(source)
         self._timeout = max(5.0, float(timeout))
-        self._backends: dict[tuple[str, str], ProviderChatBackend] = {}
+        self._backends: dict[tuple[object, ...], ProviderChatBackend] = {}
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------- selection
@@ -187,9 +202,13 @@ class ModelRouter:
         profile = self._profiles.get(profile_id)
         if profile is not None:
             self.purpose = profile.purpose
+        self.invalidate()
+        return self.active_target()
+
+    def invalidate(self) -> None:
+        """Drop cached backends after configuration that affects them changes."""
         with self._lock:
             self._backends.clear()
-        return self.active_target()
 
     # ------------------------------------------------------------- delegation
     def _provider_for(self, target: Target):
@@ -215,8 +234,17 @@ class ModelRouter:
             )
         consent = self._attachment_consent()
         # Consent is part of the key: toggling it must not reuse a backend built
-        # under the opposite decision.
-        key = (target.provider_id, target.model, consent)
+        # under the opposite decision. A provider that resolves an account also
+        # contributes that identity, so switching accounts cannot reuse a
+        # backend that is still bound to the previous credentials.
+        identity: tuple = ()
+        cache_identity = getattr(provider, "cache_identity", None)
+        if callable(cache_identity):
+            try:
+                identity = tuple(cache_identity())
+            except Exception:
+                identity = ()
+        key = (target.provider_id, target.model, consent, identity)
         with self._lock:
             backend = self._backends.get(key)
             if backend is None:
@@ -247,6 +275,17 @@ class ModelRouter:
             return False
 
     # ------------------------------------------------------------- InferenceAPI surface
+    @property
+    def is_provider_backend(self) -> bool:
+        """True when the active coding target is a provider, not llama.cpp.
+
+        ``CodingAgentLoop`` uses this to skip the legacy model-manager routing
+        step: a provider owns its model lifecycle, so loading a GGUF for the
+        same task would fight the provider and can make planning fail before
+        the provider is ever asked.
+        """
+        return self.active_target().is_provider
+
     @property
     def available(self) -> bool:
         return self.can_chat()
@@ -289,16 +328,42 @@ class ModelRouter:
         except Exception:
             return None
 
-    def chat_generate(self, request):
-        return self._backend_for(self.active_target()).chat_generate(request)
+    def chat_generate(self, request, cancel_event=None):
+        backend = self._backend_for(self.active_target())
+        try:
+            return backend.chat_generate(request, cancel_event=cancel_event)
+        except TypeError:
+            # A backend that predates cancellation support still answers; the
+            # loop checks the stop signal between phases.
+            return backend.chat_generate(request)
 
     def chat_generate_stream(self, request, cancel_event=None, read_timeout: float = 5.0):
         return self._backend_for(self.active_target()).chat_generate_stream(
             request, cancel_event=cancel_event, read_timeout=read_timeout
         )
 
-    def generate(self, request):
-        return self._backend_for(self.active_target()).generate(request)
+    def supports_streaming(self, purpose: Optional[str] = None) -> bool:
+        """True only when the active backend really delivers incremental text.
+
+        Asked before Chat chooses a rendering path, so an unsupported provider
+        falls back to the one-shot answer instead of showing a stream that never
+        starts.
+        """
+        target = self.active_target(purpose)
+        try:
+            backend = self._backend_for(target)
+        except Exception:
+            return False
+        if target.is_builtin:
+            return callable(getattr(backend, "chat_generate_stream", None))
+        return bool(getattr(backend, "supports_streaming", False))
+
+    def generate(self, request, cancel_event=None):
+        backend = self._backend_for(self.active_target())
+        try:
+            return backend.generate(request, cancel_event=cancel_event)
+        except TypeError:
+            return backend.generate(request)
 
     def load_model(self, model_path: str = "", **_kwargs):
         return self._backend_for(self.active_target()).load_model(model_path, **_kwargs)
@@ -312,15 +377,30 @@ class ModelRouter:
         # The provider owns the model; GisCode does not unload someone else's.
         return None
 
-    def cancel(self) -> None:
+    def cancel(self, request_id: Optional[str] = None) -> bool:
+        """Cancel the in-flight request, optionally only if it is ``request_id``.
+
+        The identity check is what keeps a Stop for an old answer from killing
+        the answer the user asked for next. The built-in runtime has no request
+        identity, so it is cancelled unconditionally as before.
+        """
         target = self.active_target()
         try:
             backend = self._backend_for(target)
         except Exception:
             backend = self._builtin
         cancel = getattr(backend, "cancel", None)
-        if callable(cancel):
+        if not callable(cancel):
+            return False
+        if request_id is None:
             cancel()
+            return True
+        try:
+            return bool(cancel(request_id))
+        except TypeError:
+            # A backend without identity support: its only request is this one.
+            cancel()
+            return True
 
     # ------------------------------------------------------------- vision
     def supports_vision(self, target: Optional[Target] = None) -> bool:

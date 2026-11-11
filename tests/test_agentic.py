@@ -552,6 +552,38 @@ def test_cancellation(tmp_path):
     assert cancelled.status == ExecutionPhase.CANCELLED
 
 
+def test_cancel_during_planning_is_cancelled_not_failed(tmp_path):
+    workspace = Workspace(tmp_path / "ws")
+    inference = InferenceAPI(runtime=MockLlamaCppRuntime(available=True))
+    task_manager = TaskManager()
+    loop = None
+
+    class CancellingPlanner(Planner):
+        def __init__(self):
+            super().__init__(inference=inference)
+
+        def create_plan(self, request):
+            loop.cancel()
+            raise PlanningError("cancelled while planning")
+
+    loop = CodingAgentLoop(
+        workspace,
+        inference,
+        task_manager,
+        planner=CancellingPlanner(),
+    )
+    result = loop.start(
+        TaskRequest(
+            task_id="cancel-planning",
+            description="Test cancellation during planning",
+        )
+    )
+
+    assert result.status == ExecutionPhase.CANCELLED
+    assert result.actions == []
+    assert "planner failure" not in (result.error or "")
+
+
 def test_timeout(tmp_path):
     workspace = Workspace(tmp_path / "ws")
     for i in range(30):

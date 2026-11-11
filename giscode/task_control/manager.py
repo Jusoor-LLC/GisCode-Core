@@ -10,6 +10,16 @@ class TaskManager:
         self._active_task: Optional[TaskState] = None
         self._last_task: Optional[TaskState] = None
         self._lock = threading.Lock()
+        #: Stop signal that outlives the active task. ``cancel()`` clears
+        #: ``_active_task`` immediately, so a running loop can no longer tell a
+        #: user Stop from a watchdog timeout by looking at the active task.
+        #: These two fields make that distinction durable: the event aborts an
+        #: in-flight generation, and ``_cancelled`` records *why* it was set.
+        self._cancel_event = threading.Event()
+        self._cancelled = False
+        #: Work that must be stopped outside the loop thread (a command or
+        #: pytest subprocess). ``cancel()`` runs these after releasing the lock.
+        self._cancel_hooks: list = []
 
     def start_task(
         self,
@@ -20,6 +30,10 @@ class TaskManager:
         with self._lock:
             if self._active_task is not None:
                 raise RuntimeError("Only one active task may run for a project")
+            # A new task starts with a clean stop signal; a cancel from the
+            # previous task must never poison it.
+            self._cancel_event.clear()
+            self._cancelled = False
             task = TaskState(
                 task_id=task_id,
                 start_time=datetime.now(),
@@ -45,6 +59,10 @@ class TaskManager:
     def _on_timeout(self, task: TaskState) -> None:
         with self._lock:
             if self._active_task is task and not task._cancel_event.is_set():
+                # Abort an in-flight generation, but do not record this as a
+                # user cancellation: ``_cancelled`` stays False.
+                task._cancel_event.set()
+                self._cancel_event.set()
                 task.status = TaskStatus.TIMEOUT
                 task.failure_info = {
                     "reason": "timeout",
@@ -115,31 +133,39 @@ class TaskManager:
             )
 
     def cancel(self) -> Optional[TaskState]:
+        task = None
         with self._lock:
-            if self._active_task is None:
-                return None
-            task = self._active_task
-            task._cancel_event.set()
-            task.status = TaskStatus.CANCELLED
-            if task._timer:
-                task._timer.cancel()
-            self._last_task = task
-            self._active_task = None
-            return task
+            if self._active_task is not None:
+                task = self._active_task
+                task._cancel_event.set()
+                self._cancel_event.set()
+                self._cancelled = True
+                task.status = TaskStatus.CANCELLED
+                if task._timer:
+                    task._timer.cancel()
+                self._last_task = task
+                self._active_task = None
+        if task is not None:
+            self._invoke_cancel_hooks()
+        return task
 
     def revoke(self) -> Optional[TaskState]:
+        task = None
         with self._lock:
-            if self._active_task is None:
-                return None
-            task = self._active_task
-            task._cancel_event.set()
-            task.status = TaskStatus.CANCELLED
-            task._restore_required = True
-            if task._timer:
-                task._timer.cancel()
-            self._last_task = task
-            self._active_task = None
-            return task
+            if self._active_task is not None:
+                task = self._active_task
+                task._cancel_event.set()
+                self._cancel_event.set()
+                self._cancelled = True
+                task.status = TaskStatus.CANCELLED
+                task._restore_required = True
+                if task._timer:
+                    task._timer.cancel()
+                self._last_task = task
+                self._active_task = None
+        if task is not None:
+            self._invoke_cancel_hooks()
+        return task
 
     def complete(
         self, success: bool = True, failure_info: Optional[dict] = None
@@ -159,6 +185,44 @@ class TaskManager:
             self._last_task = task
             self._active_task = None
             return task
+
+    def register_cancel_hook(self, hook) -> None:
+        """Bind work that a Stop must interrupt (e.g. a running subprocess)."""
+        if not callable(hook):
+            return
+        with self._lock:
+            if hook not in self._cancel_hooks:
+                self._cancel_hooks.append(hook)
+
+    def unregister_cancel_hook(self, hook) -> None:
+        with self._lock:
+            try:
+                self._cancel_hooks.remove(hook)
+            except ValueError:
+                pass
+
+    def _invoke_cancel_hooks(self) -> None:
+        with self._lock:
+            hooks = list(self._cancel_hooks)
+        for hook in hooks:
+            try:
+                hook()
+            except Exception:  # noqa: BLE001 - a broken hook must not undo a Stop
+                pass
+
+    @property
+    def cancel_event(self) -> threading.Event:
+        """The stop signal a running agent loop waits on."""
+        return self._cancel_event
+
+    def is_cancelled(self) -> bool:
+        """True only when a user Stop (or revoke) ended the current task.
+
+        A watchdog timeout also sets the signal (so generation stops) but
+        leaves this False, which is what keeps TIMEOUT and CANCELLED distinct.
+        """
+        with self._lock:
+            return self._cancelled
 
     def get_active_task(self) -> Optional[TaskState]:
         with self._lock:

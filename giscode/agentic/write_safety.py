@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
+import os
 import shutil
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from giscode.config.paths import giscode_home
@@ -14,6 +18,11 @@ DENIED_DIRECTORY_NAMES = frozenset({
     ".git", ".giscode", "node_modules", "__pycache__", "pycache",
     "venv", ".venv", "env", ".env", "build", "dist",
 })
+
+#: Transaction statuses that still describe an unfinished task. A rollback
+#: that could not complete keeps its record open, and a record written that
+#: way must still hydrate on the next attempt, so recovery accepts both.
+PENDING_TRANSACTION_STATUSES = frozenset({"open", "recovery_required"})
 
 
 def denied_path_reason(path: Path, project_root: Path) -> str | None:
@@ -28,6 +37,63 @@ def denied_path_reason(path: Path, project_root: Path) -> str | None:
     if resolved.name.lower().startswith(".env"):
         return "Writes to .env files are denied"
     return None
+
+
+def atomic_write_bytes(path: Path, data: bytes, *, create_only: bool = False) -> None:
+    """Write *data* atomically, optionally refusing to replace an existing path.
+
+    A staged file in the same directory is renamed over the target, so a crash
+    leaves either the old bytes or the complete new bytes, never a truncated
+    source file. ``create_only`` uses a hard link (with an exclusive-create
+    fallback) so a file that appeared after the caller checked is not lost.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staged = target.with_name(
+        f".{target.name}.giscode-write-{os.getpid()}-{uuid.uuid4().hex[:8]}.tmp"
+    )
+    try:
+        staged.write_bytes(data)
+        if create_only:
+            try:
+                os.link(staged, target)
+            except FileExistsError:
+                raise
+            except (OSError, AttributeError, NotImplementedError):
+                flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0)
+                handle = os.open(str(target), flags, 0o666)
+                try:
+                    os.write(handle, data)
+                finally:
+                    os.close(handle)
+        else:
+            os.replace(staged, target)
+    finally:
+        try:
+            staged.unlink()
+        except OSError:
+            pass
+    invalidate_bytecode(target)
+
+
+def atomic_write_text(path: Path, content: str, *, create_only: bool = False) -> None:
+    atomic_write_bytes(path, content.encode("utf-8"), create_only=create_only)
+
+
+def _atomic_copy_file(source: Path, destination: Path) -> None:
+    """Copy a snapshot baseline without exposing a partial destination file."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staged = destination.with_name(
+        f".{destination.name}.giscode-copy-{os.getpid()}-{uuid.uuid4().hex[:8]}.tmp"
+    )
+    try:
+        shutil.copy2(source, staged)
+        os.replace(staged, destination)
+    finally:
+        try:
+            staged.unlink()
+        except OSError:
+            pass
 
 
 def invalidate_bytecode(path: Path) -> None:
@@ -68,6 +134,107 @@ class SnapshotManager:
         # the user made after the task wrote the file.
         self._produced: dict[str, str] = {}
         self._relative: dict[str, str] = {}
+        #: The project this transaction belongs to. It is persisted beside the
+        #: snapshots so a later process can find and recover an unfinished task.
+        self._project_root: Path | None = None
+
+    @property
+    def transaction_path(self) -> Path:
+        """Durable transaction record, outside the project and snapshot tree."""
+        return self.root.parent.parent / "transactions" / f"{self.root.name}.json"
+
+    def bind_project(self, project_root: Path) -> None:
+        """Attach this transaction to its project and mark it open.
+
+        A process restart creates a fresh manager for the same task. The open
+        transaction record is the only place the produced digests survived, so
+        load them before a recovery rollback decides what it may restore.
+        """
+        self._project_root = Path(project_root).resolve()
+        self._hydrate_transaction()
+        self._write_transaction("open")
+
+    def _hydrate_transaction(self) -> None:
+        """Restore this task's write fingerprints from an open record.
+
+        Only an open transaction for this exact project is trusted. Every
+        relative path is checked against the project root before it becomes a
+        rollback target; a malformed or unsafe entry is ignored.
+        """
+        if self._project_root is None:
+            return
+        try:
+            payload = json.loads(self.transaction_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(payload, dict) or payload.get("format") != 1:
+            return
+        if payload.get("status") not in PENDING_TRANSACTION_STATUSES:
+            return
+        if payload.get("task") != self.root.name:
+            return
+        try:
+            recorded_root = Path(str(payload.get("project_root", ""))).resolve()
+        except (OSError, ValueError):
+            return
+        if recorded_root != self._project_root:
+            return
+        files = payload.get("files")
+        if not isinstance(files, list):
+            return
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            relative = item.get("path")
+            produced = item.get("produced")
+            if not isinstance(relative, str) or not isinstance(produced, str):
+                continue
+            target = (self._project_root / relative).resolve(strict=False)
+            try:
+                target.relative_to(self._project_root)
+            except ValueError:
+                continue
+            key = str(target).lower()
+            self._produced[key] = produced
+            self._relative[key] = relative.replace("\\", "/")
+            if item.get("created"):
+                self._created.add(key)
+
+    def mark_closed(self, status: str, *, result: dict | None = None) -> None:
+        """Finish the durable transaction record without changing project files."""
+        self._write_transaction(status, result)
+
+    def _write_transaction(self, status: str, result: dict | None = None) -> None:
+        if self._project_root is None:
+            return
+        files = []
+        for key, relative in sorted(self._relative.items(), key=lambda item: item[1].lower()):
+            files.append(
+                {
+                    "path": relative,
+                    "baseline": (self.root / relative).is_file(),
+                    "created": key in self._created,
+                    "produced": self._produced.get(key),
+                }
+            )
+        payload = {
+            "format": 1,
+            "task": self.root.name,
+            "project_root": str(self._project_root),
+            "status": status,
+            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "files": files,
+            "result": result or {},
+        }
+        try:
+            atomic_write_text(
+                self.transaction_path,
+                json.dumps(payload, indent=2, sort_keys=True, default=str),
+            )
+        except OSError:
+            # Transaction bookkeeping must never turn a successful edit into a
+            # failure. The snapshot and recovery manifest remain authoritative.
+            pass
 
     def snapshot(self, path: Path, project_root: Path) -> None:
         resolved = path.resolve(strict=False)
@@ -76,13 +243,24 @@ class SnapshotManager:
             return
         relative = resolved.relative_to(project_root.resolve())
         destination = self.root / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(resolved, destination)
+        _atomic_copy_file(resolved, destination)
         self._snapshotted.add(key)
         self._relative[key] = str(relative).replace("\\", "/")
+        self._project_root = Path(project_root).resolve()
+        self._write_transaction("open")
 
-    def record_created(self, path: Path) -> None:
-        self._created.add(str(path.resolve(strict=False)).lower())
+    def record_created(self, path: Path, project_root: Path | None = None) -> None:
+        resolved = path.resolve(strict=False)
+        key = str(resolved).lower()
+        self._created.add(key)
+        root = Path(project_root).resolve() if project_root is not None else self._project_root
+        if root is not None:
+            try:
+                self._relative[key] = str(resolved.relative_to(root)).replace("\\", "/")
+                self._project_root = root
+            except (OSError, ValueError):
+                pass
+        self._write_transaction("open")
 
     def record_written(self, path: Path, project_root: Path) -> None:
         """Remember the exact version this task just produced for *path*.
@@ -105,6 +283,8 @@ class SnapshotManager:
         key = str(resolved).lower()
         self._produced[key] = hashlib.sha256(data).hexdigest()
         self._relative[key] = str(relative).replace("\\", "/")
+        self._project_root = Path(project_root).resolve()
+        self._write_transaction("open")
 
     def written_files(self) -> list[tuple[str, str, bool]]:
         """``(relative path, produced digest, created)`` for this task's writes.
@@ -143,8 +323,7 @@ class SnapshotManager:
         except ValueError:
             return
         destination = self.root / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(data)
+        atomic_write_bytes(destination, data)
         self._snapshotted.add(key)
         self._relative[key] = str(relative).replace("\\", "/")
         # The caller captured these bytes around a command, so the file on disk
@@ -155,6 +334,8 @@ class SnapshotManager:
             current = None
         if current is not None:
             self._produced[key] = hashlib.sha256(current).hexdigest()
+        self._project_root = Path(project_root).resolve()
+        self._write_transaction("open")
 
     def applied_edits(self, project_root: Path) -> list:
         """Relative paths this task wrote but has not verified.
@@ -193,8 +374,7 @@ class SnapshotManager:
                 if saved.is_file():
                     relative = saved.relative_to(self.root)
                     target = project_root.resolve() / relative
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(saved, target)
+                    _atomic_copy_file(saved, target)
                     invalidate_bytecode(target)
         for created in self._created:
             target = Path(created)

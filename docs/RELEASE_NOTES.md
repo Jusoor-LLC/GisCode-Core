@@ -1,10 +1,69 @@
 # Release notes
 
+## 2026-11-11 — candidate v8 qualification (unpublished)
+
+**Status: READY FOR OWNER APPROVAL** — unpublished, and code signing remains the
+one owner decision. Candidate v8 was rebuilt from the reconciled v9 source
+snapshot and requalified end to end.
+
+| Artifact | Bytes | SHA-256 |
+| --- | --- | --- |
+| `GisCode.exe` | 30,989,926 | `1551b1bdfb7e407d8064ce2ac6cbbe0627c5d8201faaaccdb1e5493180d07845` |
+| `GisCodeAcceptanceHardened.exe` | 30,995,565 | `7a147fa6fd637acc5070bbfbe41ddf7584c66a67a9c2c2ad8a2fa618a57f1136` |
+| `GisCodeSetup.exe` | 42,069,957 | `a2b4b01dda72e18fa7d42f000a32394992b559a77aa08dbe5063dc4ba11b0679` |
+
+The installer embeds the exact application binary above. Windows uninstall was
+fixed for both defects found in independent qualification — a self-deletion crash
+when the registered `UninstallString` ran the installed `GisCodeSetup.exe`, and a
+locked-file failure while GisCode was still running. Uninstall now closes only
+processes running from the install folder, removes program files, shortcut and
+registry entry, keeps `%USERPROFILE%\.giscode`, and reports `CLEANUP COMPLETE`,
+`CLEANUP DEFERRED` or `CLEANUP INCOMPLETE` honestly.
+
+A fresh Windows Sandbox (11 Enterprise 26100.9818) passed install → launch →
+relaunch → uninstall with the app closed, reinstall → uninstall while running,
+and recovery from an interrupted cleanup, preserving user data every time. The
+full suite passed twice (2100 passed, 40 skipped, exit 0), 13 new real-outcome
+installer tests pass, and packaged H1 acceptance reports 27 + 7 checks with
+`HARDENED_ACCEPTANCE_OK`.
+
+**Known limitations:** model-backed coding is untested in Sandbox because the
+host Ollama service is loopback-only; chat-content persistence was therefore not
+exercised (profile-level persistence was); the build is not code-signed.
+
+See `reports/RELEASE_2026-11-11/UNINSTALL_BLOCKER_CLOSURE_2026-11-10.md` and
+`reports/RELEASE_2026-11-11/SOURCE_RECONCILIATION_2026-11-10.md`.
+
+## 2026-11-11 — prior qualification update (historical)
+
+**Status: NOT READY.** The 2026-11-10 candidate was exercised through the real
+Windows GUI: a two-file local-model task completed, three approvals were
+accepted, the project test passed, and a separate rejection changed no files.
+However, the second full-suite run failed the ChatGPT concurrent-refresh test
+(`1 failed, 2074 passed, 40 skipped`), no clean exit code was obtained, and the
+concurrency defect remains unfixed. A visible Stop-button cancellation and the
+post-completion diff viewer were not qualified. H1/security and Core
+independence pass in source-focused tests, but H1 was not re-run against the
+packaged executable. No clean-VM install, upgrade, signing or SmartScreen check
+was performed. See `reports/CORE_RELEASE_QUALIFICATION_2026-11-11.md`.
+
+## 2026-11-10 — Windows release candidate (unpublished)
+
+A reproducible one-file Core candidate was built from the authoritative
+checkout and passed `--gui-check` plus an isolated real-window launch/close
+test. The candidate is an unpublished release candidate, not a public release.
+The full suite reports `1 failed, 2074 passed, 40 skipped`; the sole failure is
+an order-dependent ChatGPT refresh concurrency test that passes in isolation.
+The GUI coding/approval/stop workflow and clean-machine installation were not
+qualified. See `reports/CORE_RELEASE_READINESS_2026-11-10.md`.
+
 ## v0.1.0 — first public Core snapshot
 
 **Status: early alpha, Windows only.** This is the first source snapshot of
-GisCode Core. There is no installer, no packaged build and no release binary; you
-run it from source.
+GisCode Core. The v0.1.0 snapshot had no installer and was not code-signed;
+v0.1.1 adds a per-user installer that is still unsigned until the free
+SignPath Foundation route is approved (see `CODE_SIGNING_POLICY.md`). The
+source tree remains the authoritative integration target.
 
 ### What this snapshot contains
 
@@ -53,8 +112,9 @@ run it from source.
   from its own history.
 - **Windows 10/11 is the tested platform.** The code has some POSIX paths, but
   other platforms are untested.
-- **The PyInstaller recipe is unverified.** `GisCode.spec` exists; no build is
-  provided or supported.
+- **The Core PyInstaller recipe is verified for this candidate.**
+  `GisCodeCore.spec` produced the 2026-11-10 candidate; a clean-VM install and
+  the old `GisCode.spec` are not verified or supported.
 
 ### Requirements
 

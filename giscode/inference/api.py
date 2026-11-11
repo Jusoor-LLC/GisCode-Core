@@ -543,7 +543,7 @@ class InferenceAPI:
                 model.error_message = str(e)
             raise UnloadFailureError(str(e))
 
-    def generate(self, request: GenerationRequest) -> GenerationResponse:
+    def generate(self, request: GenerationRequest, cancel_event: Optional[threading.Event] = None) -> GenerationResponse:
         with self._lock:
             # Resolve the loaded model against runtime liveness, never stale cache.
             resolved = self._resolved_model_state_locked()
@@ -551,8 +551,9 @@ class InferenceAPI:
                 raise InferenceUnavailableError("No model loaded")
             self._model = resolved
             self._model.state = ModelState.BUSY
-        self._cancel_event.clear()
-        cancel_event = self._cancel_event
+        if cancel_event is None:
+            self._cancel_event.clear()
+            cancel_event = self._cancel_event
 
         try:
             response = self._runtime.generate(request, cancel_event=cancel_event)
@@ -577,7 +578,7 @@ class InferenceAPI:
                 self._model.state = ModelState.READY
         return response
 
-    def chat_generate(self, request: ChatRequest) -> ChatResponse:
+    def chat_generate(self, request: ChatRequest, cancel_event: Optional[threading.Event] = None) -> ChatResponse:
         with self._lock:
             # Resolve the loaded model against runtime liveness, never stale cache.
             resolved = self._resolved_model_state_locked()
@@ -592,8 +593,9 @@ class InferenceAPI:
                 )
             self._model = resolved
             self._model.state = ModelState.BUSY
-        self._cancel_event.clear()
-        cancel_event = self._cancel_event
+        if cancel_event is None:
+            self._cancel_event.clear()
+            cancel_event = self._cancel_event
 
         try:
             response = self._runtime.chat_generate(request, cancel_event=cancel_event)

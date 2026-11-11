@@ -9,7 +9,8 @@ you start:
 
 - It runs on your own computer. No account and no cloud service are required.
 - It is **early alpha** software, and it is developed and tested on Windows only.
-- There is no installer. You run it from source with Python.
+- A **per-user Windows installer** (`GisCodeSetup.exe`) is provided for the packaged build;
+  you can also run it from source with Python (steps below).
 
 If you want the short version, [`QUICKSTART.md`](QUICKSTART.md) is a one-page
 summary of this guide. If something fails, use
@@ -267,6 +268,10 @@ your real history or settings.
 ## 9. Upgrading
 
 There is no auto-updater and no background service.
+
+From the packaged build, close GisCode and run the newer `GisCodeSetup.exe`; it
+replaces the installed files and keeps your data in `%USERPROFILE%\.giscode`.
+From a source checkout:
 
 1. Close GisCode.
 2. In the repository folder, run `git pull`.

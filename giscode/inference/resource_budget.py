@@ -220,7 +220,7 @@ class SystemResourceDetector(ResourceBudget):
             import subprocess
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, timeout=3.0,
             )
             if result.returncode == 0:
                 return result.stdout.strip().split("\n")[0]
@@ -233,7 +233,7 @@ class SystemResourceDetector(ResourceBudget):
             import subprocess
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, timeout=3.0,
             )
             if result.returncode == 0:
                 return result.stdout.strip().split("\n")[0]
@@ -246,7 +246,7 @@ class SystemResourceDetector(ResourceBudget):
             import subprocess
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, timeout=3.0,
             )
             if result.returncode == 0:
                 return int(result.stdout.strip().split("\n")[0]) * 1024 * 1024
@@ -259,7 +259,7 @@ class SystemResourceDetector(ResourceBudget):
             import subprocess
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, timeout=3.0,
             )
             if result.returncode == 0:
                 return int(result.stdout.strip().split("\n")[0]) * 1024 * 1024
@@ -272,7 +272,7 @@ class SystemResourceDetector(ResourceBudget):
             import subprocess
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, timeout=3.0,
             )
             if result.returncode == 0:
                 return int(result.stdout.strip().split("\n")[0]) * 1024 * 1024
@@ -285,7 +285,7 @@ class SystemResourceDetector(ResourceBudget):
             import subprocess
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, timeout=3.0,
             )
             if result.returncode == 0:
                 return int(result.stdout.strip().split("\n")[0]) * 1024 * 1024

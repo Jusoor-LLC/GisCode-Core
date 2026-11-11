@@ -1,0 +1,140 @@
+name: Trusted release build
+
+# Builds the three release executables from one exact commit on a GitHub-hosted
+# Windows runner, records the provenance, and uploads the unsigned artifacts.
+#
+# Deliberately NOT triggered by pull_request or pull_request_target: untrusted
+# fork code must never run in a workflow that produces artifacts someone could
+# later submit for signing. Only a manual dispatch or an owner-pushed tag runs
+# this workflow, and it uses no secrets at all.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit SHA or ref to build (default: the dispatched commit)"
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-release:
+    name: Windows release build (unsigned)
+    runs-on: windows-2022
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      PYTHONUNBUFFERED: "1"
+      GISCODE_BUILD_ROOT: build/trusted-release
+    steps:
+      # Actions are pinned to full commit SHAs. A tag can be moved; a commit
+      # cannot. The trailing comment keeps the human-readable version.
+      - name: Check out the exact commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Record the commit under test
+        shell: pwsh
+        run: |
+          $sha = (git rev-parse HEAD).Trim()
+          $expected = "${{ inputs.ref || github.sha }}".Trim()
+          if ($expected -match '^[0-9a-f]{40}$' -and $sha -ne $expected) {
+            throw "checked out $sha but $expected was requested"
+          }
+          "GISCODE_COMMIT=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Output "commit=$sha"
+
+      - name: Set up pinned Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13.15"
+          architecture: "x64"
+
+      - name: Install locked build dependencies
+        shell: pwsh
+        run: |
+          # The pip shipped with the pinned interpreter is used as-is: an
+          # unpinned self-upgrade would put a moving dependency in the middle
+          # of a build that is otherwise fixed by SHA-256.
+          python -m pip --version
+          # --require-hashes rejects any artifact whose SHA-256 is not in the
+          # lock, and --no-deps forbids installing anything outside it.
+          python -m pip install --require-hashes --no-deps -r requirements-lock.txt
+          New-Item -ItemType Directory -Force -Path "$env:GISCODE_BUILD_ROOT/provenance" | Out-Null
+          python -m pip freeze | Out-File -FilePath "$env:GISCODE_BUILD_ROOT/provenance/pip-freeze.txt" -Encoding utf8
+          python -c "import sys, PyInstaller; print('python', sys.version.split()[0]); print('pyinstaller', PyInstaller.__version__)"
+
+      - name: Enforce version metadata consistency
+        shell: pwsh
+        run: python packaging/verify_release_artifacts.py --check-source-version
+
+      - name: Build application
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean `
+            --distpath "$env:GISCODE_BUILD_ROOT/dist" `
+            --workpath "$env:GISCODE_BUILD_ROOT/work" GisCodeCore.spec
+
+      - name: Build hardened acceptance executable
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean `
+            --distpath "$env:GISCODE_BUILD_ROOT/dist-acceptance" `
+            --workpath "$env:GISCODE_BUILD_ROOT/work-acceptance" GisCodeAcceptanceHardened.spec
+
+      - name: Build installer from the application binary
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:GISCODE_BUILD_ROOT "dist/GisCode.exe"
+          $env:GISCODE_APP_EXE = (Resolve-Path $app).Path
+          python -m PyInstaller --noconfirm --clean `
+            --distpath "$env:GISCODE_BUILD_ROOT/dist-installer" `
+            --workpath "$env:GISCODE_BUILD_ROOT/work-installer" `
+            packaging/windows_installer/GisCodeSetup.spec
+
+      - name: Verify metadata, embedding and hashes; write provenance
+        shell: pwsh
+        run: |
+          # The version comes from the single authoritative source
+          # (windows_version.release_version), so a release bump cannot leave a
+          # stale literal behind; the verifier still fails on any mismatch.
+          $version = (python -c "import windows_version; print(windows_version.release_version())").Trim()
+          if (-not $version) { throw "the source declared no release version" }
+          Write-Output "verifying version $version"
+          python packaging/verify_release_artifacts.py `
+            --dist "$env:GISCODE_BUILD_ROOT/dist" `
+            --acceptance "$env:GISCODE_BUILD_ROOT/dist-acceptance" `
+            --installer "$env:GISCODE_BUILD_ROOT/dist-installer" `
+            --provenance "$env:GISCODE_BUILD_ROOT/provenance/release-provenance.json" `
+            --require-version $version
+
+      - name: Upload unsigned artifacts and provenance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: giscode-core-${{ env.GISCODE_COMMIT }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            ${{ env.GISCODE_BUILD_ROOT }}/dist/GisCode.exe
+            ${{ env.GISCODE_BUILD_ROOT }}/dist-acceptance/GisCodeAcceptanceHardened.exe
+            ${{ env.GISCODE_BUILD_ROOT }}/dist-installer/GisCodeSetup.exe
+            ${{ env.GISCODE_BUILD_ROOT }}/provenance/release-provenance.json
+            ${{ env.GISCODE_BUILD_ROOT }}/provenance/pip-freeze.txt
+
+      - name: Summarise for reviewers
+        shell: pwsh
+        run: |
+          Get-Content "$env:GISCODE_BUILD_ROOT/provenance/release-provenance.json" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

@@ -23,7 +23,7 @@ class SigningStatus(Enum):
 @dataclass
 class PackagingConfig:
     app_name: str = "GisCode"
-    version: str = "0.1.0"
+    version: str = "0.1.1"
     publisher: str = "GisCode"
     description: str = "Local-first AI coding agent"
     entry_point: str = "giscode.main:run"

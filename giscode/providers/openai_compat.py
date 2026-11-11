@@ -21,11 +21,13 @@ from giscode.providers.base import (
     join_url,
 )
 from giscode.providers.http import request_json
-from giscode.providers.lmstudio import _first_message_content
+from giscode.providers.lmstudio import _first_message_content, _stream_openai_chat
 
 
 class OpenAICompatibleProvider(Provider):
     kind = OPENAI_COMPAT
+    supports_streaming = True
+    stream_format = "sse"
     supports_download = False
     supports_pause_resume = False
     supports_delete = False
@@ -114,3 +116,39 @@ class OpenAICompatibleProvider(Provider):
             headers=self.headers(),
         )
         return _first_message_content(body, provider=self.label)
+
+    def stream_chat(
+        self,
+        model: str,
+        messages: list[dict],
+        *,
+        max_tokens: int = 256,
+        temperature: float = 0.2,
+        timeout: Optional[float] = None,
+        idle_timeout: Optional[float] = None,
+        cancel_event=None,
+        should_stop=None,
+    ):
+        """Stream ``/v1/chat/completions`` with ``stream: true``.
+
+        Uses exactly the OpenAI SSE shape this class already parses for the
+        non-streaming call, and asks for the usage block so token counts are
+        the server's numbers rather than an estimate.
+        """
+        if not model:
+            raise ProviderError(
+                "No model was selected for this endpoint.",
+                action="Pick one of the endpoint's models first.",
+            )
+        yield from _stream_openai_chat(
+            self,
+            model,
+            messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            timeout=timeout,
+            idle_timeout=idle_timeout,
+            cancel_event=cancel_event,
+            should_stop=should_stop,
+            include_usage=True,
+        )

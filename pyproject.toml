@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "giscode"
-version = "0.1.0"
+version = "0.1.1"
 description = "GisCode - local-first AI coding agent"
 # Public Core licensing is recorded in LICENSE and NOTICE. The private source
 # tree is not relicensed by this file; the export declares Apache-2.0.
@@ -25,6 +25,12 @@ test = [
     "PyYAML>=6",
     "Pillow>=10",
 ]
+
+[tool.setuptools.packages.find]
+# The repository keeps generated/user project material in workspace/, which is
+# not part of the installable distribution. Explicit discovery keeps a wheel
+# build from treating it as a second top-level package.
+include = ["giscode*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

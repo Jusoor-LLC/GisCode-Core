@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="gis-title">
+  <title id="gis-title">GisCode</title>
+  <rect width="256" height="256" rx="56" fill="#0A0E13"/>
+  <path d="M196 72 A82 82 0 1 0 198 172" fill="none" stroke="#F2A93B" stroke-width="19" stroke-linecap="round"/>
+  <path d="M92 100 L128 128 L92 156" fill="none" stroke="#4FD1C5" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M146 128 H184" fill="none" stroke="#4FD1C5" stroke-width="13" stroke-linecap="round"/>
+  <rect x="194" y="115" width="22" height="26" rx="4" fill="#F2A93B"/>
+</svg>

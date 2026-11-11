@@ -7,7 +7,7 @@ from giscode.packaging.config import PackageStatus, PackagingConfig, SigningConf
 def test_packaging_config_exists():
     config = PackagingConfig()
     assert config.app_name == "GisCode"
-    assert config.version == "0.1.0"
+    assert config.version == "0.1.1"
     assert config.package_type == "msix"
     assert config.entry_point == "giscode.main:run"
 

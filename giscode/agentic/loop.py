@@ -1,3 +1,4 @@
+import inspect
 import threading
 import time
 from datetime import datetime
@@ -235,6 +236,8 @@ class CodingAgentLoop:
         request: TaskRequest,
         *,
         root_path: Optional[str] = None,
+        adopt_active_task: bool = False,
+        expected_task_id: Optional[str] = None,
     ) -> TaskResult:
         """Run one task, optionally rooted at *root_path* for this run only.
 
@@ -243,6 +246,10 @@ class CodingAgentLoop:
         snapshot for the duration of the call. Everything is restored in
         ``finally``, so the caller's own workspace and any later task are left
         exactly as they were.
+
+        ``adopt_active_task`` is for a host that already started the one task
+        record (the Core GUI does). It is explicit, and the optional
+        ``expected_task_id`` must match, so a foreign task is still refused.
         """
         if self._task_manager is None:
             # Every phase of this loop reports through the task manager. Rather
@@ -263,10 +270,16 @@ class CodingAgentLoop:
             return result
 
         active = self._task_manager.get_active_task()
-        if active is not None:
+        adopted = active is not None
+        if adopted:
+            same_task = (
+                expected_task_id is None
+                or str(getattr(active, "task_id", "")) == str(expected_task_id)
+            )
             # Do not adopt someone else's task: its budget, cancellation and
             # rollback records belong to whoever started it.
-            return self._refuse_busy(request, active)
+            if not adopt_active_task or not same_task:
+                return self._refuse_busy(request, active)
 
         result = self.submit(request)
         saved_rooting = None
@@ -276,9 +289,17 @@ class CodingAgentLoop:
                 self._root_at(Path(root_path))
             except Exception as exc:  # noqa: BLE001 - refuse, never half-root
                 self._restore_rooting(saved_rooting)
-                return self._refuse_rooting(request, root_path, exc)
+                refused = self._refuse_rooting(request, root_path, exc)
+                if adopted:
+                    self._task_manager.complete(
+                        success=False,
+                        failure_info={"reason": "rooting_failed", "message": str(exc)},
+                    )
+                return refused
         try:
-            return self._run_started_task(request, result)
+            return self._run_started_task(
+                request, result, task_started=adopted
+            )
         finally:
             if saved_rooting is not None:
                 self._restore_rooting(saved_rooting)
@@ -367,14 +388,24 @@ class CodingAgentLoop:
         )
 
     def _run_started_task(
-        self, request: TaskRequest, result: TaskResult
+        self,
+        request: TaskRequest,
+        result: TaskResult,
+        *,
+        task_started: bool = False,
     ) -> TaskResult:
         try:
-            self._task_manager.start_task(
-                request.task_id,
-                max_duration=request.max_duration,
-                completion_criteria=request.completion_criteria,
-            )
+            if not task_started:
+                self._task_manager.start_task(
+                    request.task_id,
+                    max_duration=request.max_duration,
+                    completion_criteria=request.completion_criteria,
+                )
+            # A Stop must interrupt work that is not sitting in this thread:
+            # a running command, a pytest subprocess, or a provider request.
+            register = getattr(self._task_manager, "register_cancel_hook", None)
+            if callable(register):
+                register(self._cancel_running_work)
             criteria = (
                 request.completion_criteria
                 if isinstance(request.completion_criteria, dict)
@@ -435,9 +466,16 @@ class CodingAgentLoop:
             packaging_result = self._run_packaging()
             result.packaging = packaging_result
 
+            # A Stop that arrived while the last phase was finishing wins the
+            # race: it is reported as CANCELLED, never as a completed task.
+            if self._is_cancelled(result):
+                return self._finalize(result, request)
+
             result.status = ExecutionPhase.COMPLETE
             self._complete_task(success=True)
         except Exception as e:
+            if self._is_cancelled(result):
+                return self._finalize(result, request)
             result.status = ExecutionPhase.FAILED
             result.error = str(e)
             result.failure_info = {"reason": "exception", "message": str(e)}
@@ -456,6 +494,10 @@ class CodingAgentLoop:
         if self._task_manager is None:
             return
         try:
+            if success and self._manager_cancelled():
+                # Never upgrade a stopped task to COMPLETED. The manager already
+                # recorded CANCELLED when Stop arrived.
+                return
             if success:
                 self._task_manager.complete(success=True)
             else:
@@ -465,7 +507,14 @@ class CodingAgentLoop:
 
     def _finalize(self, result: TaskResult, request: TaskRequest) -> TaskResult:
         """Generate the final textual response and return."""
+        remover = getattr(self._task_manager, "unregister_cancel_hook", None)
+        if callable(remover):
+            try:
+                remover(self._cancel_running_work)
+            except Exception:  # noqa: BLE001 - bookkeeping only
+                pass
         self._rollback_failed_task(result)
+        self._finish_transaction(result)
         try:
             result.response = self._generate_response(request, result)
         except Exception:
@@ -473,10 +522,48 @@ class CodingAgentLoop:
         self._current_result = result
         return result
 
+    def _finish_transaction(self, result: TaskResult) -> None:
+        """Persist the transaction outcome outside the project.
+
+        A crash leaves ``open``; the next process can find it and roll it back
+        with the native recovery command. This is bookkeeping only and must
+        never replace the task's real outcome.
+        """
+        snapshot = self._snapshot_manager
+        if snapshot is None:
+            return
+        info = result.failure_info if isinstance(result.failure_info, dict) else {}
+        if result.status == ExecutionPhase.COMPLETE:
+            status = "completed"
+        elif result.status == ExecutionPhase.CANCELLED:
+            status = "cancelled"
+        elif info.get("rolled_back"):
+            status = "rolled_back"
+        elif info.get("rollback_blocked") or info.get("rollback_conflicts"):
+            status = "recovery_required"
+        else:
+            status = "failed"
+        try:
+            snapshot.mark_closed(
+                status,
+                result={
+                    "rolled_back_files": info.get("rolled_back_files", []),
+                    "discarded_edits": info.get("discarded_edits", []),
+                    "recovery_patch_dir": info.get("recovery_patch_dir", ""),
+                    "rollback_conflicts": info.get("rollback_conflicts", []),
+                    "cancelled": bool(info.get("cancelled")),
+                },
+            )
+        except Exception:  # noqa: BLE001 - bookkeeping must not replace the result
+            pass
+
     def _rollback_failed_task(self, result: TaskResult) -> None:
+        # A cancelled task keeps what it already produced: the user stopped
+        # the work, and silently deleting the edits made so far would be a
+        # more destructive answer than leaving them and saying so. Failed and
+        # timed-out tasks still roll back.
         if result.status not in (
             ExecutionPhase.FAILED,
-            ExecutionPhase.CANCELLED,
             ExecutionPhase.TIMED_OUT,
         ):
             return
@@ -544,6 +631,10 @@ class CodingAgentLoop:
         result.error = f"{result.error or 'task failed'}; {note}"
 
     def _generate_response(self, request: TaskRequest, result: TaskResult) -> Optional[str]:
+        if self._manager_cancelled() or self._cancel_event.is_set():
+            # The task was stopped; starting another model call here would
+            # delay the Stop and spend generation on an answer nobody wants.
+            return None
         if self._inference is None:
             return None
         try:
@@ -567,9 +658,131 @@ class CodingAgentLoop:
             result.inference_error = f"{type(e).__name__}: {e}"
             return None
 
+    def _manager_cancelled(self) -> bool:
+        """True when a user Stop (or revoke) ended the task, not a timeout."""
+        checker = getattr(self._task_manager, "is_cancelled", None)
+        if not callable(checker):
+            return False
+        try:
+            return bool(checker())
+        except Exception:  # noqa: BLE001 - a probe must not change the outcome
+            return False
+
+    def _cancel_signal(self):
+        """The event an in-flight model request watches for a Stop.
+
+        The task manager's event outlives ``_active_task`` and is also set by
+        the watchdog, so generation aborts promptly for either reason. The
+        loop's own event remains for callers that cancel the loop directly.
+        """
+        event = getattr(self._task_manager, "cancel_event", None)
+        if isinstance(event, threading.Event):
+            return event
+        return self._cancel_event
+
+    def _create_plan(self, request: TaskRequest):
+        """Ask the planner, passing the stop signal when it accepts one."""
+        planner = self._planner
+        try:
+            accepts_cancel = "cancel_event" in inspect.signature(
+                planner.create_plan
+            ).parameters
+        except (TypeError, ValueError):
+            accepts_cancel = False
+        if accepts_cancel:
+            return planner.create_plan(request, cancel_event=self._cancel_signal())
+        return planner.create_plan(request)
+
+    def _plan_retry_request(
+        self, request: TaskRequest, error: PlanningError
+    ) -> Optional[TaskRequest]:
+        """A one-shot retry prompt for a planning failure a retry can fix.
+
+        An empty or unparseable reply, a plan naming a file that does not
+        exist, or one importing a symbol the project does not define are all
+        recoverable: the model simply needs to be told what was wrong. Health
+        and cancellation failures are not retryable and are left alone.
+        """
+        message = str(error or "").strip()
+        if not message:
+            return None
+        retryable = getattr(error, "retryable", None)
+        if retryable is None:
+            lower = message.lower()
+            retryable = any(
+                marker in lower
+                for marker in (
+                    "empty response",
+                    "no actionable steps",
+                    "parseable json",
+                    "not a json object",
+                    "does not exist",
+                    "is not valid python",
+                    "imports",
+                )
+            )
+        if not retryable:
+            return None
+        note = (
+            "\n\n--- PLANNING RETRY ---\n"
+            f"Your previous reply was rejected: {message}\n"
+            "Reply with ONE JSON object only, no prose before or after it. "
+            "Use only files that exist and only functions, classes and imports "
+            "listed in the Repository API block. Every create/modify step must "
+            "contain the complete file content."
+        )
+        return TaskRequest(
+            task_id=f"{request.task_id}-retry",
+            description=f"{request.description}{note}",
+            max_duration=request.max_duration,
+            completion_criteria=request.completion_criteria,
+        )
+
+    def _create_plan_with_retry(self, request: TaskRequest):
+        """Plan once, then once more only for a recoverable planning failure."""
+        try:
+            return self._create_plan(request)
+        except PlanningError as exc:
+            if self._cancel_event.is_set() or self._manager_cancelled():
+                raise
+            retry = self._plan_retry_request(request, exc)
+            if retry is None:
+                raise
+            return self._create_plan(retry)
+
+    @staticmethod
+    def _plans_repeat(previous, candidate) -> bool:
+        """True when *candidate* writes only content *previous* already wrote.
+
+        Re-applying an identical edit cannot fix a failure the edit already
+        produced. A plan that also changes something else is allowed through.
+        """
+
+        def writes(plan) -> set[tuple[str, str]]:
+            out: set[tuple[str, str]] = set()
+            for step in getattr(plan, "steps", None) or []:
+                action = getattr(step.action_type, "value", step.action_type)
+                if action == "read" or not isinstance(step.content, str):
+                    continue
+                out.add((str(step.target_path or ""), step.content))
+            return out
+
+        candidate_writes = writes(candidate)
+        if not candidate_writes:
+            return False
+        return candidate_writes <= writes(previous)
+
     def _is_cancelled(self, result: TaskResult) -> bool:
-        if self._cancel_event.is_set():
+        if self._cancel_event.is_set() or self._manager_cancelled():
             result.status = ExecutionPhase.CANCELLED
+            info = result.failure_info if isinstance(result.failure_info, dict) else {}
+            info["reason"] = "cancelled"
+            info["cancelled"] = True
+            info["edits_preserved"] = True
+            result.failure_info = info
+            result.error = result.error or "task cancelled by user"
+            # Idempotent when the manager cancelled already; a direct loop
+            # cancel still records the stop.
             self._task_manager.cancel()
             return True
         if result.status in (ExecutionPhase.FAILED, ExecutionPhase.CANCELLED, ExecutionPhase.TIMED_OUT):
@@ -591,6 +804,24 @@ class CodingAgentLoop:
             return None
         return getattr(current, "name", None)
 
+    def _uses_provider_backend(self) -> bool:
+        """True when the active profile is served by an external provider.
+
+        The legacy ``RoutingService`` is a llama.cpp model selector. When the
+        user selected OpenAI (or another provider), there is no GGUF to load;
+        asking the old router would fail with "no coding model available" even
+        though the provider is ready. The provider still owns model liveness,
+        and the planner/executor/verifier path is unchanged.
+        """
+        try:
+            active = getattr(self._inference, "active_target", None)
+            if callable(active):
+                target = active()
+                return bool(getattr(target, "is_provider", False))
+            return bool(getattr(self._inference, "is_provider_backend", False))
+        except Exception:
+            return False
+
     def _run_intake(self, request: TaskRequest, result: TaskResult) -> TaskResult:
         result.status = ExecutionPhase.INTAKE
         self._task_manager.update_phase(TaskPhase.ANALYZING)
@@ -605,7 +836,7 @@ class CodingAgentLoop:
         planning_model_loaded = False
         planning_model_name = None
 
-        if self._routing_service is not None:
+        if self._routing_service is not None and not self._uses_provider_backend():
             try:
                 from giscode.routing.types import ModelAvailability, ModelRole, RoutingRequest
                 routing_request = RoutingRequest(
@@ -652,8 +883,14 @@ class CodingAgentLoop:
 
         try:
             try:
-                plan = self._planner.create_plan(request)
+                plan = self._create_plan_with_retry(request)
             except PlanningError as exc:
+                # A cancellation is a user decision, not a planning failure.
+                # Planner wraps the inference's RequestCancelledError in a
+                # PlanningError, so check the loop's cancel state before
+                # reporting a failure.
+                if self._is_cancelled(result):
+                    return result
                 # Translate a planning failure into a clean FAILED
                 # status. Without this, the planner's empty / null
                 # response would silently fall through and the loop
@@ -706,7 +943,7 @@ class CodingAgentLoop:
         coding_model_loaded = False
         coding_model_name = None
 
-        if self._routing_service is not None:
+        if self._routing_service is not None and not self._uses_provider_backend():
             try:
                 from giscode.routing.types import ModelAvailability, ModelRole, RoutingRequest
                 routing_request = RoutingRequest(
@@ -772,6 +1009,12 @@ class CodingAgentLoop:
             action_result = self._execute_step(step)
             result.actions.append(action_result)
 
+            # The step that just ran keeps its record, but a Stop means no
+            # further tool or edit may execute - and a step interrupted this
+            # way is not reported as an action failure.
+            if self._is_cancelled(result):
+                return result
+
             if not action_result.success:
                 result.status = ExecutionPhase.FAILED
                 result.error = action_result.error
@@ -799,6 +1042,9 @@ class CodingAgentLoop:
             request_text=request_text,
         )
         result.verification = verification
+
+        if self._is_cancelled(result):
+            return result
 
         if not verification.success:
             result.error = "; ".join(verification.errors)
@@ -1012,7 +1258,7 @@ class CodingAgentLoop:
         coding_model_loaded = False
         coding_model_name = None
 
-        if self._routing_service is not None:
+        if self._routing_service is not None and not self._uses_provider_backend():
             try:
                 from giscode.routing.types import ModelAvailability, ModelRole, RoutingRequest
                 routing_request = RoutingRequest(
@@ -1068,8 +1314,10 @@ class CodingAgentLoop:
                 return result
 
             try:
-                repair_plan = self._planner.create_plan(repair_request)
+                repair_plan = self._create_plan_with_retry(repair_request)
             except PlanningError as exc:
+                if self._is_cancelled(result):
+                    return result
                 result.status = ExecutionPhase.FAILED
                 result.error = f"repair planning failure: {exc}"
                 result.failure_info = {
@@ -1092,19 +1340,28 @@ class CodingAgentLoop:
             suspicious, reason = self._repair_plan_looks_suspicious(
                 repair_plan, original_expected, verification
             )
+            previous_plan = result.plan
+            if not suspicious and self._plans_repeat(previous_plan, repair_plan):
+                suspicious = True
+                reason = (
+                    "The repair plan repeats exactly the edits that already "
+                    "failed verification; a different change is required."
+                )
             if suspicious:
                 corrective_request = self._build_corrective_replan_request(
                     request, result, repair_plan, reason
                 )
                 try:
-                    repair_plan = self._planner.create_plan(corrective_request)
+                    repair_plan = self._create_plan(corrective_request)
                 except PlanningError:
+                    if self._is_cancelled(result):
+                        return result
                     corrective_failed = True
                 else:
                     suspicious, reason = self._repair_plan_looks_suspicious(
                         repair_plan, original_expected, verification
                     )
-                    if suspicious:
+                    if suspicious or self._plans_repeat(previous_plan, repair_plan):
                         corrective_failed = True
                     else:
                         corrective_failed = False
@@ -1398,13 +1655,28 @@ class CodingAgentLoop:
             }
         return {"status": result.status.value, "error": result.error}
 
+    def _cancel_running_work(self) -> None:
+        """Stop the process/model calls this loop currently owns.
+
+        Called by :class:`TaskManager` from whichever thread pressed Stop, so
+        a command or pytest child is killed while the worker thread is still
+        blocked reading its pipes.
+        """
+        for candidate in (
+            self._terminal_executor,
+            self._sandbox_executor,
+            self._inference,
+        ):
+            cancel = getattr(candidate, "cancel", None)
+            if callable(cancel):
+                try:
+                    cancel()
+                except Exception:  # noqa: BLE001 - one failing stop must not stop the rest
+                    pass
+
     def cancel(self) -> Optional[TaskResult]:
         self._cancel_event.set()
-        try:
-            if self._inference is not None:
-                self._inference.cancel()
-        except Exception:
-            pass
+        self._cancel_running_work()
         if self._current_result is not None:
             self._current_result.status = ExecutionPhase.CANCELLED
             self._task_manager.cancel()

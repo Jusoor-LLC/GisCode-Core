@@ -11,6 +11,17 @@ this guide covers both:
 Both are local. Neither needs an account, and neither sends your project
 anywhere.
 
+There are also two **optional remote** routes, each off by default:
+
+- **ChatGPT plan usage** in **Settings → ChatGPT plan (Sign in with ChatGPT)**.
+  It uses an eligible ChatGPT plan through OAuth, not an API key, and does not
+  create API billing. See [`CHATGPT_PLAN.md`](CHATGPT_PLAN.md).
+- **OpenAI API** in **Settings → OpenAI API (optional, billable)**. It needs
+  your own API key and bills your OpenAI API account. See
+  [`OPENAI_DIRECT.md`](OPENAI_DIRECT.md).
+
+A ChatGPT subscription is not API access, and an API key is not plan access.
+
 ---
 
 ## 1. Which route should you use?
@@ -289,6 +300,8 @@ untouched - it does not invent steps to look successful.
 | `ollama pull` / LM Studio model download | Yes, once, managed by those tools |
 | Running GisCode with a local model or provider | **No** |
 | Connection and coding tests | **No** |
+| OpenAI API provider, only after you enable billable calls | **Yes** — requests go to `api.openai.com` |
+| ChatGPT plan provider, only after you sign in and select it | **Yes** — sign-in uses `auth.openai.com`; inference uses `api.openai.com` |
 
 ---
 
@@ -314,5 +327,7 @@ Limits, stated rather than hidden:
 - [`INSTALLATION.md`](INSTALLATION.md) — Python, the server and the first launch.
 - [`MODEL_COMPATIBILITY.md`](MODEL_COMPATIBILITY.md) — formats, quantization and
   memory.
+- [`OPENAI_DIRECT.md`](OPENAI_DIRECT.md) — the optional direct OpenAI API route.
+- [`CHATGPT_PLAN.md`](CHATGPT_PLAN.md) — the optional ChatGPT plan route.
 - [`USER_GUIDE.md`](USER_GUIDE.md) — the interface.
 - [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — when a provider or model refuses.

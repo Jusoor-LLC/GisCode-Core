@@ -25,6 +25,12 @@ from giscode.providers.base import (
     join_url,
 )
 from giscode.providers.http import request_json
+from giscode.providers.streaming import (
+    StreamDelta,
+    StreamError,
+    iter_ndjson_objects,
+    stream_response,
+)
 
 #: Families Ollama reports that imply a capability GisCode can use. Anything not
 #: listed is left unclassified rather than guessed.
@@ -38,6 +44,8 @@ _FAMILY_CAPABILITIES = {
 class OllamaProvider(Provider):
     kind = OLLAMA
     label = "Ollama"
+    supports_streaming = True
+    stream_format = "ndjson"
     supports_download = False
     supports_pause_resume = False
     supports_delete = False
@@ -167,3 +175,75 @@ class OllamaProvider(Provider):
             "Ollama answered without any message content.",
             action="Check 'ollama list' and the model name, then test again.",
         )
+
+    def stream_chat(
+        self,
+        model: str,
+        messages: list[dict],
+        *,
+        max_tokens: int = 256,
+        temperature: float = 0.2,
+        timeout: Optional[float] = None,
+        idle_timeout: Optional[float] = None,
+        cancel_event=None,
+        should_stop=None,
+    ):
+        """Stream ``POST /api/chat`` as newline-delimited JSON objects.
+
+        Ollama sends one JSON object per line: ``message.content`` deltas while
+        generating, then a final object with ``done: true``, ``done_reason``
+        and ``eval_count``. An object carrying ``error`` is a provider failure,
+        not the end of a successful answer.
+        """
+        if not model:
+            raise ProviderError(
+                "No model was selected for this provider.",
+                action="Choose an installed model, then test again.",
+            )
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "options": {"temperature": temperature, "num_predict": max_tokens},
+        }
+        completed = False
+        with stream_response(
+            join_url(self.endpoint, "api/chat"),
+            payload=payload,
+            headers=self.headers(),
+            timeout=timeout or max(self.timeout, 60.0),
+            idle_timeout=idle_timeout,
+            cancel_event=cancel_event,
+            should_stop=should_stop,
+        ) as chunks:
+            for obj in iter_ndjson_objects(chunks):
+                error = obj.get("error")
+                if error:
+                    raise ProviderError(
+                        f"Ollama reported an error while streaming: {error}",
+                        action="Check 'ollama serve' and its log for the reason.",
+                    )
+                message = obj.get("message") or {}
+                content = message.get("content") if isinstance(message, dict) else None
+                if isinstance(content, str) and content:
+                    yield StreamDelta(text=content)
+                if obj.get("done"):
+                    completed = True
+                    usage = {}
+                    prompt_tokens = obj.get("prompt_eval_count")
+                    completion_tokens = obj.get("eval_count")
+                    if isinstance(prompt_tokens, int):
+                        usage["prompt_tokens"] = prompt_tokens
+                    if isinstance(completion_tokens, int):
+                        usage["completion_tokens"] = completion_tokens
+                    yield StreamDelta(
+                        done=True,
+                        finish_reason=str(obj.get("done_reason") or "stop"),
+                        tokens=int(completion_tokens or 0),
+                        usage=usage,
+                    )
+        if not completed:
+            raise StreamError(
+                "Ollama closed the stream before reporting the answer was done.",
+                action="Try again; if it repeats, check that 'ollama serve' is healthy.",
+            )

@@ -199,7 +199,14 @@ _MODEL_REQUIRED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("explain", re.compile(r"\bexplain\b|\bsummar(y|ise|ize)\b|\bwhat does\b|\bwhy\b", re.I)),
     ("review", re.compile(r"\breview\b|\bimprove\b|\boptimi[sz]e\b|\bclean up\b", re.I)),
     ("rename", re.compile(r"\brename\b|\bchoose (a )?name\b", re.I)),
-    ("generate", re.compile(r"\bgenerate\b|\bscaffold\b|\bboilerplate\b", re.I)),
+    (
+        "generate",
+        re.compile(
+            r"\bgenerate\b|\bscaffold\b|\bboilerplate\b|"
+            r"\b(?:add|create|implement|write|update|extend|build|make)\b",
+            re.I,
+        ),
+    ),
     ("plan", re.compile(r"\bplan\b|\bdesign\b|\barchitect\b", re.I)),
 )
 

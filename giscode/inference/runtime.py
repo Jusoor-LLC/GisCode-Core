@@ -401,6 +401,11 @@ class GenerationResponse:
     request_id: Optional[str] = None
     tokens_generated: int = 0
     finish_reason: str = "stop"
+    # Populated by provider-backed backends so a caller can attribute the
+    # answer without consulting global state. The built-in runtime leaves
+    # these empty, which is honest: its provider is llama.cpp.
+    provider: str = ""
+    model: str = ""
 
 
 @dataclass
@@ -486,6 +491,9 @@ class ChatResponse:
     request_id: Optional[str] = None
     tokens_generated: int = 0
     finish_reason: str = "stop"
+    # See GenerationResponse: provider-backed answers name their source.
+    provider: str = ""
+    model: str = ""
 
 
 class LlamaCppRuntime(ABC):

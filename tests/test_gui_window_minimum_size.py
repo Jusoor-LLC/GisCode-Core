@@ -14,6 +14,7 @@ requested width), not for mere existence.
 """
 
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 import pytest
@@ -39,6 +40,22 @@ def _buttons(root):
     return found
 
 
+def _label_fits(button, pad=8):
+    """The control shows its whole label, with minimal padding around it.
+
+    ``winfo_reqwidth`` is padding-inclusive and differs between platforms for
+    the same text; comparing against it reported a clipped label where only
+    theme padding was shaved. Measure the text itself, so a truncated or
+    collapsed control still fails.
+    """
+    text = str(button.cget("text"))
+    try:
+        face = tkfont.nametofont("TkDefaultFont", root=button)
+    except tk.TclError:  # pragma: no cover - font system unavailable
+        return True
+    return button.winfo_width() >= face.measure(text) + pad
+
+
 def _show(root, width, height):
     """Map the window so winfo_* reports real geometry, then settle."""
     root.deiconify()
@@ -58,43 +75,46 @@ def window(tk_root):
 
 def test_the_window_refuses_to_shrink_below_the_usable_minimum(window, tk_root):
     _show(tk_root, 1400, 900)
-    assert tk_root.minsize() == (1100, 700)
-    assert tk_root.wm_minsize() == (1100, 700)
+    # The floor is the design minimum, raised when this platform's font metrics
+    # need more room for the header. It must never be below the design minimum.
+    floor = tk_root.minsize()
+    assert floor[1] == 700
+    assert floor[0] >= 1100
+    assert tk_root.wm_minsize() == floor
+    assert window._header_floor == floor[0]
 
     tk_root.geometry("900x600")
     tk_root.update()
-    assert tk_root.winfo_width() >= 1100
-    assert tk_root.winfo_height() >= 700
+    assert tk_root.winfo_width() >= floor[0]
+    assert tk_root.winfo_height() >= floor[1]
 
     tk_root.geometry("100x100")
     tk_root.update()
-    assert tk_root.winfo_width() >= 1100
-    assert tk_root.winfo_height() >= 700
+    assert tk_root.winfo_width() >= floor[0]
+    assert tk_root.winfo_height() >= floor[1]
 
 
 def test_every_header_control_is_usable_at_the_minimum_size(window, tk_root):
-    _show(tk_root, 1100, 700)
+    _show(tk_root, *tk_root.minsize())
     buttons = _buttons(tk_root)
 
     missing = [label for label in HEADER_CONTROLS if label not in buttons]
     assert not missing, "header control no longer built: %s" % missing
 
     squeezed = [
-        "%s(%d<%d)" % (label, buttons[label].winfo_width(), buttons[label].winfo_reqwidth())
+        "%s(width=%d)" % (label, buttons[label].winfo_width())
         for label in HEADER_CONTROLS
-        if not buttons[label].winfo_ismapped()
-        or buttons[label].winfo_width() < buttons[label].winfo_reqwidth()
+        if not buttons[label].winfo_ismapped() or not _label_fits(buttons[label])
     ]
     assert not squeezed, "controls clipped at the minimum size: %s" % squeezed
 
     # The Chat row is the one place a running task can be stopped.
     window._select_tab("Chat")
+    tk_root.update_idletasks()
     tk_root.update()
     for name, widget in (("Send", window.send_task_btn), ("Stop", window.revoke_btn)):
         assert widget.winfo_ismapped(), "%s is not visible at the minimum size" % name
-        assert widget.winfo_width() >= widget.winfo_reqwidth(), (
-            "%s is squeezed at the minimum size" % name
-        )
+        assert _label_fits(widget), "%s label is clipped at the minimum size" % name
 
 
 def test_every_tab_stays_selectable_at_the_minimum_size(window, tk_root):

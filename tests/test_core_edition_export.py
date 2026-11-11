@@ -44,6 +44,26 @@ def test_core_keeps_the_model_manager_and_the_adspace():
     assert "AdSpace" in edition.tabs()
 
 
+def _private_tree_ships_the_pro_implementations() -> bool:
+    """True when this checkout is the private tree, not a public export.
+
+    The assertions below describe a *generated public Core export*, where the
+    Pro modules are absent by construction. Asking the private tree not to
+    contain its own code is not a behavioural regression, it is the wrong
+    target: the private tree asserts the other side of the boundary in
+    ``tests/test_edition_separation.py``. The condition is structural (does any
+    Pro module exist?) rather than an environment switch, so in a public export
+    every check below still runs unchanged.
+    """
+    return any(
+        importlib.util.find_spec(module) is not None for module in PRO_MODULES
+    )
+
+
+@pytest.mark.skipif(
+    _private_tree_ships_the_pro_implementations(),
+    reason="validates a generated public Core export; this checkout ships the Pro modules",
+)
 @pytest.mark.parametrize("name", PRO_MODULES)
 def test_the_pro_implementations_are_not_in_the_public_tree(name):
     assert importlib.util.find_spec(name) is None, f"{name} was published"

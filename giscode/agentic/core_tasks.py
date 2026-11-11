@@ -533,6 +533,20 @@ def _should_ask_the_model(status: str, capability: str, router) -> bool:
     return _model_selected(router)
 
 
+def _should_run_coding_agent(status: str, capability: str, router, agent) -> bool:
+    """True only for an editing request with a selected model and a real loop.
+
+    Chat remains the answer for explanation/review/planning conversation. A
+    request that must change code is handed to the existing coding loop, where
+    the guarded writer, approval callback, verifier and repair path live.
+    """
+    if agent is None or not callable(getattr(agent, "start", None)):
+        return False
+    from giscode.agentic.model_coding import can_handle
+
+    return can_handle(status, capability) and _model_selected(router)
+
+
 def execute_request(
     message: str,
     project_root: str,
@@ -543,8 +557,15 @@ def execute_request(
     clock: Callable[[], float] = time.monotonic,
     approve: Optional[Callable[[Path, str], bool]] = None,
     model_router: Optional[object] = None,
-    model_purpose: str = "chat",
+    coding_agent: Optional[object] = None,
+    agent_task_id: Optional[str] = None,
+    # This dispatcher runs coding work in a project, so the coding profile is
+    # the correct default. "chat" here silently bypassed a configured coding
+    # provider and fell back to the built-in llama.cpp runtime.
+    model_purpose: str = "coding",
     attachments: Optional[list] = None,
+    on_delta: Optional[Callable[[str], None]] = None,
+    cancel_event=None,
 ) -> dict:
     """Run one supported deterministic request in *project_root*.
 
@@ -585,6 +606,23 @@ def execute_request(
                 deadline_s=deadline_s,
                 purpose="vision",
                 images=images,
+                on_delta=on_delta,
+                cancel_event=cancel_event,
+            )
+        if _should_run_coding_agent(status, capability, model_router, coding_agent):
+            from giscode.agentic.model_coding import run_coding_agent
+
+            remaining = None if deadline is None else max(0.0, deadline - clock())
+            return run_coding_agent(
+                coding_agent,
+                message=message,
+                project_root=project_root,
+                task_id=task_id,
+                capability=capability,
+                agent_task_id=agent_task_id,
+                deadline_s=remaining,
+                approve=approve,
+                should_cancel=cancelled,
             )
         if _should_ask_the_model(status, capability, model_router):
             from giscode.agentic.model_chat import answer_with_model
@@ -606,6 +644,8 @@ def execute_request(
                 should_cancel=cancelled,
                 deadline_s=deadline_s,
                 purpose=model_purpose,
+                on_delta=on_delta,
+                cancel_event=cancel_event,
             )
         return _refused(
             task_id,

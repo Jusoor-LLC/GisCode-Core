@@ -7,7 +7,7 @@ your machine against a `llama-server` that you supply — no cloud service is
 required, and no account is needed.
 
 > **Status: early alpha.** This is a working research project, not a finished
-> product. It is developed and tested on Windows only. There is no installer yet.
+> product. It is developed and tested on Windows only. A per-user Windows installer is available for the packaged build.
 >
 > **New here?** Install with [Installation](docs/INSTALLATION.md), learn the
 > window with the [User guide](docs/USER_GUIDE.md), connect a model with
@@ -79,8 +79,13 @@ so GisCode reports them as unavailable and runs the Core tools.
 - **GisCode AdSpace has no provider.** Unity Ads and AppLovin are mobile-only and
   cannot run in a Windows desktop build, so the panel reports that honestly and
   shows no advertising. See [`docs/ADVERTISING.md`](docs/ADVERTISING.md).
-- Packaging is partial: a PyInstaller recipe exists (`GisCode.spec`), but no
-  release build is provided or supported.
+- Packaging is a verified **unpublished release candidate** for Core: the
+  application, hardened acceptance build and per-user installer in
+  `reports/RELEASE_2026-11-11/candidate-v8/` are built from the v9 source
+  snapshot. Install, upgrade and the registered Windows uninstall path are
+  qualified in a disposable sandbox; the build is **not code-signed** and nothing
+  is published. See
+  `reports/RELEASE_2026-11-11/UNINSTALL_BLOCKER_CLOSURE_2026-11-10.md`.
 
 ## Local-only operation, and models versus servers
 
@@ -148,9 +153,14 @@ py -3.13 -m giscode.main --gui-check
 
 It exits non-zero with `GUI_CHECK_FAIL: ...` if the window cannot be built.
 
-For upgrade and manual-removal guidance, see
-[Upgrade and removal](docs/QUICKSTART.md#upgrade-and-removal). There is no
-uninstaller and no background service.
+The packaged build installs per user from a `GisCodeSetup.exe` installer and
+registers an uninstaller; a source checkout is removed by deleting it. There is
+no background service and no auto-update. See
+[Upgrade and removal](docs/QUICKSTART.md#upgrade-and-removal).
+
+Release binaries, their SHA-256 values and the build and signing process are
+described in [Download](docs/DOWNLOAD.md), [Build and release](docs/BUILD_AND_RELEASE.md)
+and the [Code signing policy](CODE_SIGNING_POLICY.md).
 
 ## Where GisCode looks for the server and the models
 
@@ -223,10 +233,10 @@ py -3.13 -m pytest tests --ignore=tests/fixtures
 
 ## Building a Windows EXE
 
-`GisCode.spec` is the PyInstaller recipe used by the author
-(`pyinstaller GisCode.spec`). The build is **not** verified in this repository
-and is not required to run from source. The frozen build has no console, so
-look in the log file under `~/.giscode/logs` when it misbehaves.
+`GisCodeCore.spec` produced the verified 2026-11-10 Windows candidate;
+`GisCode.spec` is the older author recipe and is not verified for this tree. A
+clean-VM install and code signing were not performed. The frozen build has no
+console, so look in the log file under `~/.giscode/logs` when it misbehaves.
 
 ## Documentation
 

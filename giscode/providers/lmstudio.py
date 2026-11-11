@@ -28,11 +28,20 @@ from giscode.providers.base import (
     join_url,
 )
 from giscode.providers.http import request_json
+from giscode.providers.streaming import (
+    SSE_DONE_EVENT,
+    StreamDelta,
+    StreamError,
+    iter_sse_objects,
+    stream_response,
+)
 
 
 class LMStudioProvider(Provider):
     kind = LMSTUDIO
     label = "LM Studio"
+    supports_streaming = True
+    stream_format = "sse"
     supports_download = False
     supports_pause_resume = False
     supports_delete = False
@@ -121,6 +130,124 @@ class LMStudioProvider(Provider):
             headers=self.headers(),
         )
         return _first_message_content(body, provider="LM Studio")
+
+    def stream_chat(
+        self,
+        model: str,
+        messages: list[dict],
+        *,
+        max_tokens: int = 256,
+        temperature: float = 0.2,
+        timeout: Optional[float] = None,
+        idle_timeout: Optional[float] = None,
+        cancel_event=None,
+        should_stop=None,
+    ):
+        if not model:
+            raise ProviderError(
+                "No model was selected for LM Studio.",
+                action="Load a model in LM Studio and choose it here.",
+            )
+        yield from _stream_openai_chat(
+            self,
+            model,
+            messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            timeout=timeout,
+            idle_timeout=idle_timeout,
+            cancel_event=cancel_event,
+            should_stop=should_stop,
+        )
+
+
+def _stream_openai_chat(
+    provider: Provider,
+    model: str,
+    messages: list[dict],
+    *,
+    max_tokens: int,
+    temperature: float,
+    timeout: Optional[float],
+    idle_timeout: Optional[float],
+    cancel_event,
+    should_stop,
+    include_usage: bool = False,
+    token_field: str = "max_tokens",
+):
+    """Decode an OpenAI-shaped SSE chat stream into :class:`StreamDelta` events.
+
+    Shared by LM Studio and generic OpenAI-compatible servers because they use
+    the same protocol: ``data: {...}`` lines, content under
+    ``choices[0].delta.content``, an optional ``finish_reason``, and a final
+    ``data: [DONE]``. A server that closes without either signal is reported as
+    an incomplete stream rather than a finished answer.
+    """
+    payload = {
+        "model": model,
+        "messages": messages,
+        token_field: max_tokens,
+        "temperature": temperature,
+        "stream": True,
+    }
+    if include_usage:
+        # llama.cpp and OpenAI honour this; the usage block then arrives in the
+        # final chunk. Servers that do not know it still stream content fine.
+        payload["stream_options"] = {"include_usage": True}
+    finish = "stop"
+    tokens = 0
+    usage: dict = {}
+    saw_done = False
+    saw_finish = False
+    with stream_response(
+        join_url(provider.endpoint, "v1/chat/completions"),
+        payload=payload,
+        headers=provider.headers(),
+        timeout=timeout or max(provider.timeout, 60.0),
+        idle_timeout=idle_timeout,
+        cancel_event=cancel_event,
+        should_stop=should_stop,
+    ) as chunks:
+        for obj in iter_sse_objects(chunks):
+            if obj is SSE_DONE_EVENT:
+                saw_done = True
+                break
+            if not isinstance(obj, dict):
+                continue
+            error = obj.get("error")
+            if error:
+                message = error.get("message") if isinstance(error, dict) else error
+                raise ProviderError(
+                    f"{provider.label or provider.kind} reported an error while "
+                    f"streaming: {message}",
+                    action="Check the provider's log for the reason.",
+                )
+            choices = obj.get("choices") or []
+            if choices and isinstance(choices[0], dict):
+                choice = choices[0]
+                delta = choice.get("delta") or {}
+                content = delta.get("content") if isinstance(delta, dict) else None
+                if isinstance(content, str) and content:
+                    yield StreamDelta(text=content)
+                elif isinstance(choice.get("text"), str) and choice.get("text"):
+                    yield StreamDelta(text=choice["text"])
+                reason = choice.get("finish_reason")
+                if reason:
+                    saw_finish = True
+                    finish = str(reason)
+            block = obj.get("usage") or {}
+            if isinstance(block, dict) and block:
+                usage = dict(block)
+                number = block.get("completion_tokens")
+                if isinstance(number, int):
+                    tokens = number
+    if not saw_done and not saw_finish:
+        raise StreamError(
+            f"{provider.label or provider.kind} closed the stream before the answer "
+            "was complete.",
+            action="Try again; if it repeats, check the provider's log.",
+        )
+    yield StreamDelta(done=True, finish_reason=finish, tokens=tokens, usage=usage)
 
 
 def _first_message_content(body, *, provider: str) -> str:

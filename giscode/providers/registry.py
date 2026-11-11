@@ -15,9 +15,11 @@ import re
 from typing import Optional
 
 from giscode.providers.base import (
+    CHATGPT,
     DEFAULT_ENDPOINTS,
     LMSTUDIO,
     OLLAMA,
+    OPENAI,
     OPENAI_COMPAT,
     PROVIDER_KINDS,
     Provider,
@@ -25,8 +27,13 @@ from giscode.providers.base import (
     ProviderModel,
     ProviderStatus,
 )
+from giscode.providers.chatgpt_auth import ChatGPTAccountStore
+from giscode.providers.chatgpt_plan import API_ENDPOINT as CHATGPT_ENDPOINT
+from giscode.providers.chatgpt_plan import ChatGPTPlanProvider
+from giscode.providers.credentials import CredentialStore, default_credential_store
 from giscode.providers.lmstudio import LMStudioProvider
 from giscode.providers.ollama import OllamaProvider
+from giscode.providers.openai import OFFICIAL_ENDPOINT, OpenAIProvider
 from giscode.providers.openai_compat import OpenAICompatibleProvider
 
 
@@ -48,6 +55,27 @@ def default_provider_configs() -> dict:
             "allow_remote": False,
             "api_key_env": "",
         },
+        OPENAI: {
+            "kind": OPENAI,
+            "label": "OpenAI",
+            "endpoint": OFFICIAL_ENDPOINT,
+            # Remote and billable: off until the user explicitly enables it.
+            "enabled": False,
+            "allow_remote": True,
+            "api_key_env": "OPENAI_API_KEY",
+            "paid_calls_allowed": False,
+            "pricing": {},
+        },
+        CHATGPT: {
+            "kind": CHATGPT,
+            "label": "ChatGPT plan",
+            "endpoint": CHATGPT_ENDPOINT,
+            # Plan-funded, not API-billed. Off until a user deliberately signs
+            # in and selects it; no API key is involved.
+            "enabled": False,
+            "allow_remote": True,
+            "account_id": "",
+        },
     }
 
 
@@ -55,6 +83,8 @@ _BUILDERS = {
     OLLAMA: OllamaProvider,
     LMSTUDIO: LMStudioProvider,
     OPENAI_COMPAT: OpenAICompatibleProvider,
+    OPENAI: OpenAIProvider,
+    CHATGPT: ChatGPTPlanProvider,
 }
 
 
@@ -66,9 +96,16 @@ def _slug(value: str) -> str:
 class ProviderRegistry:
     """Reads provider settings and builds live provider objects."""
 
-    def __init__(self, settings, *, timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        settings,
+        *,
+        timeout: float = 5.0,
+        credentials: Optional[CredentialStore] = None,
+    ) -> None:
         self._settings = settings
         self._timeout = timeout
+        self._credentials = credentials or default_credential_store()
 
     # -- configuration -----------------------------------------------------
     def configs(self) -> dict:
@@ -114,6 +151,28 @@ class ProviderRegistry:
                     api_key=api_key,
                     allow_remote=bool(config.get("allow_remote", False)),
                     allow_vision=bool(config.get("vision", False)),
+                )
+            if kind == CHATGPT:
+                return builder(
+                    str(config.get("endpoint") or CHATGPT_ENDPOINT),
+                    label=str(config.get("label") or provider_id),
+                    timeout=self._timeout,
+                    account_id=str(config.get("account_id") or ""),
+                    account_store=ChatGPTAccountStore(),
+                    allow_vision=False,
+                )
+            if kind == OPENAI:
+                return builder(
+                    str(config.get("endpoint") or OFFICIAL_ENDPOINT),
+                    label=str(config.get("label") or provider_id),
+                    timeout=self._timeout,
+                    api_key=api_key,
+                    api_key_env=key_env or "OPENAI_API_KEY",
+                    credential_store=self._credentials,
+                    paid_calls_allowed=bool(config.get("paid_calls_allowed", False)),
+                    pricing=dict(config.get("pricing") or {}),
+                    usage_path=config.get("usage_path") or None,
+                    allow_vision=False,
                 )
             return builder(
                 str(config.get("endpoint") or DEFAULT_ENDPOINTS.get(kind, "")),
@@ -233,7 +292,7 @@ class ProviderRegistry:
         configs = self.configs()
         if provider_id not in configs:
             raise KeyError(f"unknown provider {provider_id!r}")
-        if provider_id in (OLLAMA, LMSTUDIO):
+        if provider_id in (OLLAMA, LMSTUDIO, OPENAI):
             configs[provider_id]["enabled"] = False
         else:
             configs.pop(provider_id, None)
