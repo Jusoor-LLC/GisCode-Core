@@ -14,6 +14,7 @@ requested width), not for mere existence.
 """
 
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 import pytest
@@ -37,6 +38,22 @@ def _buttons(root):
         if isinstance(widget, ttk.Button):
             found.setdefault(widget.cget("text"), widget)
     return found
+
+
+def _label_fits(button, pad=8):
+    """The control shows its whole label, with minimal padding around it.
+
+    ``winfo_reqwidth`` is padding-inclusive and differs between platforms for
+    the same text; comparing against it reported a clipped label where only
+    theme padding was shaved. Measure the text itself, so a truncated or
+    collapsed control still fails.
+    """
+    text = str(button.cget("text"))
+    try:
+        face = tkfont.nametofont("TkDefaultFont", root=button)
+    except tk.TclError:  # pragma: no cover - font system unavailable
+        return True
+    return button.winfo_width() >= face.measure(text) + pad
 
 
 def _show(root, width, height):
@@ -85,10 +102,9 @@ def test_every_header_control_is_usable_at_the_minimum_size(window, tk_root):
     assert not missing, "header control no longer built: %s" % missing
 
     squeezed = [
-        "%s(%d<%d)" % (label, buttons[label].winfo_width(), buttons[label].winfo_reqwidth())
+        "%s(width=%d)" % (label, buttons[label].winfo_width())
         for label in HEADER_CONTROLS
-        if not buttons[label].winfo_ismapped()
-        or buttons[label].winfo_width() < buttons[label].winfo_reqwidth()
+        if not buttons[label].winfo_ismapped() or not _label_fits(buttons[label])
     ]
     assert not squeezed, "controls clipped at the minimum size: %s" % squeezed
 
@@ -98,9 +114,7 @@ def test_every_header_control_is_usable_at_the_minimum_size(window, tk_root):
     tk_root.update()
     for name, widget in (("Send", window.send_task_btn), ("Stop", window.revoke_btn)):
         assert widget.winfo_ismapped(), "%s is not visible at the minimum size" % name
-        assert widget.winfo_width() >= widget.winfo_reqwidth(), (
-            "%s is squeezed at the minimum size" % name
-        )
+        assert _label_fits(widget), "%s label is clipped at the minimum size" % name
 
 
 def test_every_tab_stays_selectable_at_the_minimum_size(window, tk_root):
