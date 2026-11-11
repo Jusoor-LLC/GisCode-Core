@@ -15,7 +15,8 @@ does the narrow thing:
   that this task created it and it is unchanged since.
 
 Nothing here infers a change from an action log alone: the snapshot's baselines
-are the authority for original content.
+are the authority for original content. Re-applying a discarded version is
+handled by Core's native ``giscode.agentic.recover_edits`` command.
 """
 
 from __future__ import annotations
@@ -484,10 +485,16 @@ class RollbackOutcome:
         if not self.discarded:
             return ""
         where = f" at {self.patch_dir}" if self.patch_dir else ""
+        task = Path(self.patch_dir).name if self.patch_dir else ""
+        command = (
+            f"python -m giscode.agentic.recover_edits restore --task {task}"
+            if task
+            else "python -m giscode.agentic.recover_edits list"
+        )
         return (
             f"Kept the content this rollback discarded{where}: "
             + ", ".join(self.discarded)
-            + ". Re-apply it with python -m giscode.gisai.recover_edits."
+            + f". Re-apply it deliberately with {command}."
         )
 
     def summary(self) -> str:
@@ -986,12 +993,42 @@ def changes_from_snapshot(
                 f"the pre-edit snapshot could not be read ({type(exc).__name__})"
             )
 
+    try:
+        root: Path | None = Path(project_root).resolve()
+    except (OSError, TypeError):
+        root = None
+    try:
+        baseline_root: Path | None = Path(snapshot.root) if snapshot is not None else None
+    except (AttributeError, TypeError):
+        baseline_root = None
+
     changes: list[TaskChange] = []
+    seen: set[str] = set()
     for relative in applied:
         name = normalise_relative(relative)
-        if not name:
+        if not name or name.lower() in seen:
             continue
+        seen.add(name.lower())
         changes.append(recorded.get(name.lower()) or TaskChange(name))
+
+    # ``applied_edits`` cannot see a file whose pre-edit baseline is missing:
+    # with nothing to compare against, the file is not "applied", so an
+    # interrupted version would stay on disk while the rollback reported a
+    # full undo. The durable write record still names every file this task
+    # wrote, so keep those without a baseline in scope and let the per-file
+    # account report the conflict instead of silently dropping them.
+    for key, change in recorded.items():
+        if key in seen:
+            continue
+        target = _inside(root, change.relative) if root is not None else None
+        if target is None or not target.is_file():
+            continue
+        if baseline_root is not None:
+            saved = _inside(baseline_root, change.relative)
+            if saved is not None and saved.is_file():
+                continue
+        seen.add(key)
+        changes.append(change)
     return changes
 
 

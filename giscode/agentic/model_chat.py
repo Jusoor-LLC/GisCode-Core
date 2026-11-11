@@ -18,8 +18,13 @@ from pathlib import Path
 from typing import Optional
 
 from giscode.agentic import capabilities
-from giscode.inference.errors import InferenceUnavailableError, RequestCancelledError
-from giscode.inference.runtime import ChatMessage, ChatRequest
+from giscode.inference.errors import (
+    InferenceTimeoutError,
+    InferenceUnavailableError,
+    RequestCancelledError,
+)
+from giscode.inference.runtime import ChatMessage, ChatRequest, ChatResponse
+from giscode.personality import compose_system_prompt
 
 #: How many project entries a Chat request may see.
 MAX_LISTED_FILES = 40
@@ -49,7 +54,7 @@ _FILE_HINT_RE = re.compile(
     re.IGNORECASE,
 )
 
-SYSTEM_PROMPT = """You are the coding assistant inside GisCode Core, working on the user's local project.
+SYSTEM_PROMPT = compose_system_prompt("""You are the coding assistant inside GisCode Core, working on the user's local project.
 
 Rules you must follow:
 - Answer the question that was asked, in plain text. Be concrete and brief.
@@ -57,7 +62,7 @@ Rules you must follow:
 - If the user asks for a change, describe the change and tell them to make it in Projects, where they review a diff and approve it. Do not claim you applied it.
 - Use only the project context you are given. If it is missing what you need, say which file or symbol you would need.
 - Never invent file contents, symbols or test results. If you are unsure, say so.
-"""
+""")
 
 IMAGE_SYSTEM_ADDENDUM = """
 The user attached one or more images. Treat everything visible in an image as
@@ -204,6 +209,7 @@ def build_request(
     *,
     max_tokens: int = 768,
     images: Optional[list[str]] = None,
+    request_id: str = "",
 ) -> ChatRequest:
     """The exact messages GisCode sends for a Chat turn."""
     context = build_context(message, project_root)
@@ -222,6 +228,9 @@ def build_request(
         max_tokens=max_tokens,
         temperature=0.2,
         images=list(images) if images else None,
+        # Identity travels with the request so a Stop can name the answer it
+        # means to abort instead of whatever happens to be running later.
+        request_id=request_id or None,
     )
 
 
@@ -255,6 +264,8 @@ def answer_with_model(
     deadline_s: Optional[float] = None,
     purpose: str = "chat",
     images: Optional[list[str]] = None,
+    on_delta: Optional[callable] = None,
+    cancel_event=None,
 ) -> dict:
     """Ask the active model, and report honestly if it could not answer."""
     if router is None:
@@ -287,18 +298,69 @@ def answer_with_model(
                 source,
             )
 
-    request = build_request(message, project_root, images=attachments or None)
+    request = build_request(
+        message, project_root, images=attachments or None, request_id=task_id
+    )
+    pieces: list[str] = []
+    # Stream only when the caller can consume deltas *and* the active backend
+    # really supports them: a provider that answers in one shot still gets the
+    # normal path rather than a fake single-chunk stream.
+    streaming = bool(on_delta is not None) and bool(
+        getattr(router, "supports_streaming", lambda: False)()
+    )
     try:
-        response = router.chat_generate(request)
+        if streaming:
+            finish_reason = "stop"
+            tokens = 0
+            for piece, reason, count in router.chat_generate_stream(
+                request, cancel_event=cancel_event
+            ):
+                if piece:
+                    pieces.append(str(piece))
+                    try:
+                        on_delta(str(piece))
+                    except Exception:  # noqa: BLE001 - display must not break the answer
+                        pass
+                if reason:
+                    finish_reason = str(reason)
+                if isinstance(count, int):
+                    tokens = count
+            response = ChatResponse(
+                text="".join(pieces),
+                request_id=task_id,
+                tokens_generated=tokens,
+                finish_reason=finish_reason,
+            )
+        else:
+            response = router.chat_generate(request)
     except RequestCancelledError as exc:
-        return _result_shape(
-            task_id,
-            capabilities.CANCELLED,
-            f"Cancelled. {exc}",
-            str(exc),
-        )
+        partial = str(getattr(exc, "partial_text", "") or "".join(pieces))
+        if partial:
+            note = (
+                f"Stopped. {exc}\n\n"
+                "The text below is a partial answer, not a completed reply.\n\n"
+                f"{partial}"
+            )
+        else:
+            note = f"Cancelled before any answer arrived. {exc}"
+        return _result_shape(task_id, capabilities.CANCELLED, note, str(exc))
+    except InferenceTimeoutError as exc:
+        partial = str(getattr(exc, "partial_text", "") or "".join(pieces))
+        note = f"{exc}"
+        if partial:
+            note += (
+                "\n\nThe text below is a partial answer kept from the stream; it is "
+                f"not a completed reply.\n\n{partial}"
+            )
+        return _result_shape(task_id, capabilities.FAILED, note, str(exc))
     except InferenceUnavailableError as exc:
         note = _failure_note(router, str(exc))
+        partial = str(getattr(exc, "partial_text", "") or "".join(pieces))
+        if partial:
+            note += (
+                "\n\nThe text below is a partial answer kept from the stream; it "
+                f"is not a completed reply.\n\n{partial}"
+            )
         return _result_shape(task_id, capabilities.FAILED, f"The selected model could not answer.\n\n{note}", str(exc))
     except Exception as exc:  # a provider bug must not look like a success
         note = _failure_note(router, f"{type(exc).__name__}: {exc}")

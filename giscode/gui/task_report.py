@@ -131,6 +131,28 @@ def ran_shell_commands(work_result: dict) -> bool:
     )
 
 
+NO_NEWLINE_MARKER = "\\ No newline at end of file"
+
+
+def render_unified_diff(lines: list[str]) -> str:
+    """Join one file's unified-diff lines into text git can be compared with.
+
+    ``difflib`` yields the last line of a file that has no trailing newline
+    without one, so joining the lines of two files ran the first file's last
+    hunk line into the next file's ``---`` header (``+    return a - b---
+    app.py``). Each line is therefore terminated, and a line that lacked its own
+    newline gets the standard ``\\ No newline at end of file`` marker that git
+    prints. The diff itself is unchanged: same headers, same hunks, same order.
+    """
+    parts: list[str] = []
+    for line in lines:
+        terminated = line if line.endswith("\n") else f"{line}\n"
+        parts.append(terminated)
+        if not line.endswith("\n"):
+            parts.append(f"{NO_NEWLINE_MARKER}\n")
+    return "".join(parts)
+
+
 def build_change_summary(work_result: dict, project_root: str) -> dict:
     # Core-owned classification: GisAI is optional, so this report must not
     # import the GisAI planner at module scope, and a copied set drifts.
@@ -180,7 +202,7 @@ def build_change_summary(work_result: dict, project_root: str) -> dict:
         additions = sum(1 for line in diff[2:] if line.startswith("+") and not line.startswith("+++") )
         deletions = sum(1 for line in diff[2:] if line.startswith("-") and not line.startswith("---") )
         files.append({"path": relative, "additions": additions, "deletions": deletions})
-        diffs.extend(diff)
+        diffs.append(render_unified_diff(diff))
     verification = _verification(work_result)
     try:
         repair_attempts = int(work_result.get("repair_attempts") or 0)

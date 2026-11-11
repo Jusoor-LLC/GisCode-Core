@@ -1635,7 +1635,9 @@ class ProjectWorkspaceView:
         make_value_copyable(lifecycle_label, self._lifecycle_var.get)
 
 
-        self._workspace_tabs = ttk.Notebook(self._parent)
+        self._workspace_tabs = ttk.Notebook(
+            self._parent, style="Gis.SubTabs.TNotebook"
+        )
         self._workspace_tabs.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
         planner_tab = ttk.Frame(self._workspace_tabs)
         self._workspace_tabs.add(planner_tab, text="Planer")

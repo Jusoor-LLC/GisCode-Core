@@ -26,8 +26,24 @@ from typing import Optional
 DEFAULT_LOGO_SMALL = "gis_logo_small.png"
 DEFAULT_LOGO_SPLASH = "gis_logo_splash.png"
 LOGO_SVG = "gis_logo.svg"
+#: The authentic Gis star. ``gis_logo_small.png`` (48 px tile) and
+#: ``gis_logo_splash.png`` (620 px star with the GIS wordmark) shipped in the
+#: initial public release and were extracted from the original
+#: ``gis-logo.html`` artwork; ``gis_logo.ico`` is the same 48 px tile packaged
+#: as a multi-size Windows icon. The Ink & Ember shell uses these assets
+#: unchanged so the brand mark is the original one, not a redesign.
+DEFAULT_LOGO_MARK = "gis_logo_small.png"
+DEFAULT_LOGO_MARK_LARGE = "gis_logo_splash.png"
+APP_ICON = "gis_logo.ico"
 
-DEFAULT_ASSETS = (DEFAULT_LOGO_SMALL, DEFAULT_LOGO_SPLASH, LOGO_SVG)
+DEFAULT_ASSETS = (
+    DEFAULT_LOGO_SMALL,
+    DEFAULT_LOGO_SPLASH,
+    LOGO_SVG,
+    DEFAULT_LOGO_MARK,
+    DEFAULT_LOGO_MARK_LARGE,
+    APP_ICON,
+)
 
 MAX_CUSTOM_LOGO_BYTES = 256 * 1024
 

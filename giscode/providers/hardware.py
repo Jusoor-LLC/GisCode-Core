@@ -11,6 +11,8 @@ cannot see drivers, other applications, or the model's real allocation pattern.
 """
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -88,19 +90,17 @@ def _read_attr(obj, *names, default=0):
     return default
 
 
-def detect_hardware(budget=None) -> Hardware:
-    """Detect RAM/VRAM through the existing resource budget.
+#: A hardware probe can involve a driver subprocess. Never let that subprocess
+#: hold the Tk main thread: a full-suite run stalled inside nvidia-smi while a
+#: window was being constructed. Detection is therefore bounded and cached.
+_HARDWARE_TIMEOUT_S = 2.0
+_HARDWARE_CACHE_TTL_S = 30.0
+_HARDWARE_CACHE_LOCK = threading.Lock()
+_HARDWARE_CACHE: Optional[Hardware] = None
+_HARDWARE_CACHE_AT = 0.0
 
-    A budget that cannot answer yields zeros, which the assessment treats as
-    unknown rather than assuming the machine can run anything.
-    """
-    if budget is None:
-        try:
-            from giscode.inference.resource_budget import DefaultResourceBudget
 
-            budget = DefaultResourceBudget()
-        except Exception:
-            return Hardware()
+def _hardware_from_budget(budget) -> Hardware:
     try:
         resources = budget.get_system_resources()
     except Exception:
@@ -113,6 +113,56 @@ def detect_hardware(budget=None) -> Hardware:
         ),
         gpu_name=str(getattr(resources, "gpu_name", "") or ""),
     )
+
+
+def _detect_with_timeout(budget, timeout: float = _HARDWARE_TIMEOUT_S) -> Hardware:
+    """Run a budget probe in a daemon thread and never wait past *timeout*.
+
+    ``subprocess.run(timeout=...)`` alone is not sufficient on Windows: a
+    driver command that leaves its output pipe open can keep ``communicate``
+    blocked after the timeout. The UI only needs an answer, not the probe's
+    process, so a timed-out probe returns unknown and is allowed to finish (or
+    not) in the background.
+    """
+    result: dict[str, Hardware] = {}
+
+    def work() -> None:
+        result["value"] = _hardware_from_budget(budget)
+
+    worker = threading.Thread(target=work, name="giscode-hardware-probe", daemon=True)
+    worker.start()
+    worker.join(max(0.0, float(timeout)))
+    return result.get("value", Hardware())
+
+
+def detect_hardware(budget=None) -> Hardware:
+    """Detect RAM/VRAM through the existing resource budget.
+
+    A budget that cannot answer yields zeros, which the assessment treats as
+    unknown rather than assuming the machine can run anything. The default
+    probe is also cached briefly: a GUI rebuild must not launch one driver
+    process per window.
+    """
+    global _HARDWARE_CACHE, _HARDWARE_CACHE_AT
+
+    if budget is None:
+        now = time.monotonic()
+        with _HARDWARE_CACHE_LOCK:
+            if _HARDWARE_CACHE is not None and now - _HARDWARE_CACHE_AT < _HARDWARE_CACHE_TTL_S:
+                return _HARDWARE_CACHE
+        try:
+            from giscode.inference.resource_budget import DefaultResourceBudget
+
+            budget = DefaultResourceBudget()
+        except Exception:
+            return Hardware()
+
+    detected = _detect_with_timeout(budget)
+    if budget is not None:
+        with _HARDWARE_CACHE_LOCK:
+            _HARDWARE_CACHE = detected
+            _HARDWARE_CACHE_AT = time.monotonic()
+    return detected
 
 
 def _estimate(size_bytes: int, context_length: int, budget) -> int:

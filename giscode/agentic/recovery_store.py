@@ -6,8 +6,9 @@ several can be the correct one. This module writes the discarded bytes (and a
 readable unified diff) *before* ``safe_rollback`` removes them, so the content
 survives the undo.
 
-Nothing here puts a file back. ``giscode.gisai.recover_edits`` does that, and
-only after re-checking digests, containment and approval.
+Nothing here puts a file back. Core's native
+``giscode.agentic.recover_edits`` command does that, and only after re-checking
+digests, containment and explicit approval.
 
 Layout, under the profile's ``recovery`` directory::
 
@@ -38,6 +39,7 @@ __all__ = [
     "directory_for_snapshot",
     "task_for_snapshot",
     "record_discarded",
+    "mark_restored",
     "load",
 ]
 
@@ -134,6 +136,7 @@ class DiscardedEdit:
     created: bool
     blob: Path
     diff: Path
+    restored: bool = False
 
     def read_bytes(self) -> bytes:
         """The saved content, or ``OSError`` when it is gone or was tampered with."""
@@ -202,6 +205,8 @@ def _existing_entries(directory: Path) -> dict[str, dict]:
             "baseline": item.get("baseline") if isinstance(item.get("baseline"), str) else None,
             "created": bool(item.get("created")),
             "saved_at": item.get("saved_at", ""),
+            "restored": bool(item.get("restored")),
+            "restored_at": item.get("restored_at", ""),
         }
     return kept
 
@@ -244,6 +249,8 @@ def record_discarded(
         "baseline": baseline,
         "created": bool(created),
         "saved_at": _now(),
+        "restored": False,
+        "restored_at": "",
     }
     payload = {
         "format": FORMAT,
@@ -264,12 +271,48 @@ def record_discarded(
             relative=name,
             produced=produced,
             baseline=baseline,
-            created=bool(created),
-            blob=blob,
-            diff=diff,
-        ),
-        "",
-    )
+            created=bool(created),                blob=blob,
+                diff=diff,
+            ),
+            "",
+        )
+
+
+def mark_restored(directory: Path, relative: str) -> bool:
+    """Mark one saved entry as already re-applied, so a repeat is a no-op."""
+    directory = Path(directory)
+    path = directory / MANIFEST_NAME
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(payload, dict) or payload.get("format") != FORMAT:
+        return False
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        return False
+    wanted = _safe_relative(relative)
+    if wanted is None:
+        return False
+    changed = False
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        if _safe_relative(item.get("relative", "")) == wanted:
+            item["restored"] = True
+            item["restored_at"] = _now()
+            changed = True
+    if not changed:
+        return False
+    payload["updated_at"] = _now()
+    try:
+        _atomic_write(
+            path,
+            json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"),
+        )
+    except OSError:
+        return False
+    return True
 
 
 def load(directory: Path) -> Manifest:
@@ -305,6 +348,7 @@ def load(directory: Path) -> Manifest:
                 created=bool(item.get("created")),
                 blob=directory / FILES_DIR / name,
                 diff=directory / DIFFS_DIR / f"{name}.diff",
+                restored=bool(item.get("restored")),
             )
         )
     return manifest

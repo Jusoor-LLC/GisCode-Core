@@ -12,6 +12,7 @@ caps how much it looks at so a huge repository cannot stall planning.
 
 from __future__ import annotations
 
+import ast
 import logging
 import os
 import re
@@ -331,6 +332,77 @@ def render_declaration_block(
         "declarations": declarations,
         "characters": len(block),
     }
+
+
+def _python_facts(text: str) -> list[str]:
+    """Top-level definitions and local imports of one Python module.
+
+    Only facts a caller can rely on: ``def``/``class`` names, module-level
+    assignments, and the names a module imports. A file that does not parse
+    yields no facts rather than an invented summary.
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return []
+    facts: list[str] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            facts.append(f"def {node.name}")
+        elif isinstance(node, ast.ClassDef):
+            facts.append(f"class {node.name}")
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    facts.append(target.id)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names = ", ".join(alias.name for alias in node.names if alias.name != "*")
+            if names:
+                facts.append(f"from {node.module} import {names}")
+    return facts
+
+
+def render_api_block(
+    root: str | Path,
+    *,
+    limit_files: int = 24,
+    max_chars: int = 1400,
+) -> str:
+    """A compact, bounded list of the project APIs that actually exist.
+
+    The planner used to receive paths and (for two named files) contents, so a
+    small model would invent a plausible helper name and only find out after
+    the edit, when the import failed. These are facts read from disk - the
+    function and class names each Python file defines and what it imports -
+    so a plan can reuse a real API. It never contains file bodies, is hard
+    capped, and returns ``""`` when the project has no readable Python source.
+    """
+    base = Path(root)
+    if not base.is_dir():
+        return ""
+    header = (
+        "Repository API (names verified from disk; use these exact names and "
+        "never invent a helper or an import):"
+    )
+    lines: list[str] = []
+    used = len(header) + 1
+    files = [
+        rel
+        for rel in list_source_files(base, limit=max(limit_files * 3, limit_files))
+        if rel.endswith(".py")
+    ][: max(1, limit_files)]
+    for relative in files:
+        facts = _python_facts(read_source(base / relative))
+        if not facts:
+            continue
+        line = f"- {relative}: " + "; ".join(facts)
+        if used + len(line) + 1 > max_chars:
+            break
+        lines.append(line)
+        used += len(line) + 1
+    if not lines:
+        return ""
+    return header + "\n" + "\n".join(lines) + "\n"
 
 
 def render_source_block(root: str | Path, limit: int = DEFAULT_FILE_LIMIT) -> str:

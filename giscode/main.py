@@ -516,7 +516,169 @@ def _try_autoload_model(logger, settings, model_manager: "ModelManager") -> None
         logger.warning(f"Auto-load of model '{selected_name}' failed: {e}")
 
 
+def _run_pending_recovery_cli() -> None:
+    """Recover an interrupted Core transaction from the packaged application.
+
+    This deliberately runs before bootstrap and the GUI: recovery must work
+    without a model, network access, GisAI, or any project window. ``--yes``
+    is the explicit approval for changing files; without it the transaction is
+    reported as still requiring recovery and nothing is written.
+    """
+    import argparse
+
+    from giscode.agentic.recover_edits import recover_pending_transactions
+
+    parser = argparse.ArgumentParser(
+        prog="GisCode --recover-pending",
+        description="Roll back a crash-interrupted Core coding transaction.",
+    )
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--profile-root", default="")
+    parser.add_argument("--yes", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", default="")
+    args, _unknown = parser.parse_known_args()
+
+    approve = (lambda _task, _files: True) if args.yes else None
+    results = recover_pending_transactions(
+        args.project,
+        profile_root=args.profile_root or None,
+        approve=approve,
+        dry_run=args.dry_run,
+    )
+    payload = {
+        "format": "giscode.pending_recovery.v1",
+        "project": os.path.abspath(os.path.expanduser(args.project)),
+        "profile_root": args.profile_root,
+        "approved": bool(args.yes),
+        "dry_run": bool(args.dry_run),
+        "results": [item.as_dict() for item in results],
+    }
+    if args.json:
+        target = Path(args.json).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    for item in results:
+        try:
+            print(f"{item.task}: {item.status}")
+            if item.blocked:
+                print(f"  {item.blocked}")
+        except Exception:
+            pass
+    ok = all(item.status in {"recovered", "would_recover"} for item in results)
+    sys.exit(0 if ok else 1)
+
+def _run_coding_task_cli() -> None:
+    """Run one real coding task from the packaged Core executable, without a GUI.
+
+    This is the native packaged path for qualification and headless automation:
+    it goes through the same bootstrap, profile router, CodingAgentLoop, guarded
+    writer, verifier and recovery records as the application. It deliberately
+    does not use GisAI or any Pro service.
+    """
+    import argparse
+    from pathlib import Path as _Path
+
+    from giscode.agentic.types import TaskRequest
+
+    parser = argparse.ArgumentParser(prog="GisCode --run-coding-task")
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--request", required=True)
+    parser.add_argument("--task-id", default="")
+    parser.add_argument("--max-duration", type=float, default=300.0)
+    parser.add_argument("--json", default="")
+    args, _unknown = parser.parse_known_args()
+
+    (
+        _settings,
+        _workspace,
+        _task_manager,
+        _inference,
+        _model_manager,
+        coding_agent,
+        _terminal_executor,
+        _sandbox_executor,
+        _orchestrator,
+        _openhands_adapter,
+        _knowledge_service,
+        _routing_service,
+        _ocr_service,
+        _monitoring_service,
+        _packaging_builder,
+        _signing_service,
+        _self_improvement_service,
+        _research_service,
+        _gisai_engine,
+    ) = bootstrap()
+
+    root = _Path(args.project).expanduser().resolve()
+    task_id = args.task_id or f"packaged-task-{int(time.time())}"
+    request = TaskRequest(
+        task_id=task_id,
+        description=args.request,
+        max_duration=args.max_duration,
+        completion_criteria={
+            "project_root": str(root),
+            "project_id": "packaged-recovery",
+        },
+    )
+    setter = getattr(coding_agent, "set_edit_approval_callback", None)
+    if callable(setter):
+        setter(lambda _path, _diff: True)
+    result = coding_agent.start(request, root_path=str(root))
+    actions = []
+    for action in getattr(result, "actions", []) or []:
+        actions.append(
+            {
+                "type": str(getattr(getattr(action, "action_type", None), "value", getattr(action, "action_type", ""))),
+                "path": str(getattr(action, "target_path", "")),
+                "success": bool(getattr(action, "success", False)),
+                "error": getattr(action, "error", None),
+            }
+        )
+    verification = getattr(result, "verification", None)
+    payload = {
+        "format": "giscode.coding_task.v1",
+        "task_id": task_id,
+        "project": str(root),
+        "status": str(getattr(getattr(result, "status", None), "value", getattr(result, "status", ""))),
+        "error": getattr(result, "error", None),
+        "response": getattr(result, "response", None),
+        "changed_files": list(coding_agent.changed_files_for(task_id) or []),
+        "actions": actions,
+        "verification": {
+            "success": bool(getattr(verification, "success", False)),
+            "errors": list(getattr(verification, "errors", []) or []),
+            "details": list(getattr(verification, "details", []) or []),
+        },
+    }
+    if args.json:
+        target = _Path(args.json).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        print(json.dumps({"task_id": task_id, "status": payload["status"], "changed_files": payload["changed_files"]}))
+    except Exception:
+        pass
+    sys.exit(0 if payload["status"] == "complete" else 1)
+
+
 def run() -> None:
+    # Refuse an unsafe or malformed acceptance run before bootstrap() creates
+    # the profile, opens a database or writes a log line.
+    refusal = _acceptance_refusal_reason()
+    if refusal is not None:
+        print(f"SCENARIO_REFUSED: {refusal}", flush=True)
+        sys.stdout.flush()
+        os._exit(2)
+    if "--recover-pending" in sys.argv:
+        _run_pending_recovery_cli()
+        return
+    if "--run-coding-task" in sys.argv:
+        _run_coding_task_cli()
+        return
     settings, workspace, task_manager, inference, model_manager, coding_agent, terminal_executor, sandbox_executor, orchestrator, openhands_adapter, knowledge_service, routing_service, ocr_service, monitoring_service, packaging_builder, signing_service, self_improvement_service, research_service, gisai_engine = bootstrap()
     logger = get_logger("giscode.main")
 
@@ -774,6 +936,9 @@ ACCEPTANCE_BUILD_MARKER = "_giscode_acceptance_build"
 ACCEPTANCE_OPT_IN_ENV = "GISCODE_ACCEPTANCE_OPT_IN"
 ACCEPTANCE_OPT_IN_VALUE = "1"
 
+#: Selects an interactive scenario executed against the frozen GUI.
+ACCEPTANCE_SCENARIO_ENV = "GISCODE_ACCEPTANCE_SCENARIO"
+
 #: Evidence files are written only below this directory in the temporary root.
 ACCEPTANCE_EVIDENCE_ROOT = "giscode_acceptance"
 
@@ -789,6 +954,33 @@ def _acceptance_automation_enabled() -> bool:
     if not getattr(sys, ACCEPTANCE_BUILD_MARKER, False):
         return False
     return os.environ.get(ACCEPTANCE_OPT_IN_ENV, "").strip() == ACCEPTANCE_OPT_IN_VALUE
+
+
+def _acceptance_refusal_reason() -> str | None:
+    """Why an armed acceptance run must refuse before it starts, else ``None``.
+
+    Scenario validation used to happen only once the GUI existed, by which point
+    ``bootstrap()`` had created the profile, opened the knowledge store and
+    written its first log line - so a run that was about to be refused had
+    already modified the profile it refused to touch. Checking here, before any
+    of that, makes the refusal genuinely read-only.
+    """
+
+    if not _acceptance_automation_enabled():
+        return None
+    scenario = os.environ.get(ACCEPTANCE_SCENARIO_ENV, "").strip()
+    if not scenario:
+        # The task-driving acceptance path validates its own variables.
+        return None
+
+    from giscode.acceptance_runtime import preflight
+    from giscode.acceptance_safety import DisposableHomeError
+
+    try:
+        preflight(scenario, _acceptance_evidence_name)
+    except DisposableHomeError as exc:
+        return exc.reason
+    return None
 
 
 def _acceptance_evidence_name(value: str) -> str | None:
@@ -995,6 +1187,21 @@ def _schedule_gui_acceptance(root, model_manager) -> None:
     temporary directory.
     """
     if not _acceptance_automation_enabled():
+        return
+
+    # An interactive scenario drives the AI Web Chat, settings and project
+    # surfaces in-process; the task-driving path below stays the default so a
+    # packaged qualification of the coding loop is unchanged.
+    scenario = os.environ.get(ACCEPTANCE_SCENARIO_ENV, "").strip()
+    if scenario:
+        from giscode.acceptance_runtime import schedule_scenario
+
+        schedule_scenario(
+            root,
+            scenario,
+            evidence_path=_acceptance_evidence_path,
+            write_evidence=_acceptance_write_evidence,
+        )
         return
 
     project_path = os.environ.get("GISCODE_ACCEPTANCE_PROJECT", "").strip()

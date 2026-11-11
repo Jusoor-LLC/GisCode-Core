@@ -45,6 +45,9 @@ SHARED_FEATURES: frozenset[str] = frozenset(
         "attachment_analysis",
         "model_manager",
         "settings",
+        "ai_web_chat",
+        # Kept as an alias: older callers used the ChatGPT-specific feature id.
+        "chatgpt_browser",
     }
 )
 
@@ -120,6 +123,7 @@ PRO_IMPLEMENTATION: dict[str, tuple[str, ...]] = {
 #: Navigation tab label -> feature id. A tab that is not listed is never built.
 TAB_FEATURES: dict[str, str] = {
     "Chat": "chat",
+    "AI Web Chat": "ai_web_chat",
     "Projects": "projects",
     "Terminal": "terminal",
     "Settings": "settings",
@@ -139,9 +143,10 @@ TAB_FEATURES: dict[str, str] = {
 }
 
 #: Visible tab order per edition. Anything not in the tuple is not built.
-CORE_TABS = ("Chat", "Projects", "Model Manager", "Settings", "AdSpace")
+CORE_TABS = ("Chat", "AI Web Chat", "Projects", "Model Manager", "Settings", "AdSpace")
 PRO_TABS = (
     "Chat",
+    "AI Web Chat",
     "Projects",
     "Terminal",
     "Settings",

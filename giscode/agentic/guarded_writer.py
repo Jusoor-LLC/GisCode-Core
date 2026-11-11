@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from giscode.agentic.types import ActionResult, ActionType
-from giscode.agentic.write_safety import SnapshotManager, denied_path_reason, invalidate_bytecode
+from giscode.agentic.write_safety import (
+    SnapshotManager,
+    atomic_write_text,
+    denied_path_reason,
+)
 
 
 LARGE_SHRINK_MIN_LINES = 50
@@ -122,11 +126,24 @@ class GuardedWriter:
             if self.snapshot is not None:
                 self.snapshot.snapshot(target, self.project_root)
         elif self.snapshot is not None:
-            self.snapshot.record_created(target)
+            self.snapshot.record_created(target, self.project_root)
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        invalidate_bytecode(target)
+        try:
+            atomic_write_text(target, content, create_only=not exists)
+        except FileExistsError:
+            return ActionResult(
+                action_type=action_type,
+                target_path=str(target),
+                success=False,
+                error=f"File already exists: {target}",
+            )
+        except OSError as exc:
+            return ActionResult(
+                action_type=action_type,
+                target_path=str(target),
+                success=False,
+                error=f"File could not be written atomically: {exc}",
+            )
         if self.snapshot is not None:
             # Record the version this task produced, so a later rollback can
             # tell it apart from a save the user made afterwards.

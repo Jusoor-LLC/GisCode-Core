@@ -29,8 +29,12 @@ from urllib.parse import urlparse
 OLLAMA = "ollama"
 LMSTUDIO = "lmstudio"
 OPENAI_COMPAT = "openai_compat"
+OPENAI = "openai"
+#: Sign in with ChatGPT plan usage. A different product from ``OPENAI``:
+#: plan-funded inference, never an API key and never API billing.
+CHATGPT = "chatgpt"
 
-PROVIDER_KINDS = (OLLAMA, LMSTUDIO, OPENAI_COMPAT)
+PROVIDER_KINDS = (OLLAMA, LMSTUDIO, OPENAI_COMPAT, OPENAI, CHATGPT)
 
 #: The built-in runtime: GisCode's own llama-server process. It is not a network
 #: provider, so it is absent from ``PROVIDER_KINDS``; it appears in profiles so a
@@ -40,6 +44,8 @@ LLAMA_CPP = "llama.cpp"
 DEFAULT_ENDPOINTS = {
     OLLAMA: "http://127.0.0.1:11434",
     LMSTUDIO: "http://127.0.0.1:1234",
+    OPENAI: "https://api.openai.com",
+    CHATGPT: "https://api.openai.com",
 }
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})
@@ -207,6 +213,12 @@ class Provider:
     #: /v1/models, a generic OpenAI-compatible URL). GisCode never infers vision
     #: support from a model's name.
     allow_vision: bool = False
+    #: True only when this provider really delivers incremental chat deltas.
+    #: Declared per provider rather than probed at runtime: a server that quietly
+    #: ignores ``stream`` would otherwise look like a one-chunk stream.
+    supports_streaming: bool = False
+    #: Wire format used by :meth:`stream_chat` (``ndjson`` or ``sse``).
+    stream_format: str = ""
 
     def __init__(
         self,
@@ -247,12 +259,42 @@ class Provider:
     ) -> str:  # pragma: no cover - interface
         raise NotImplementedError
 
+    def stream_chat(
+        self,
+        model: str,
+        messages: list[dict],
+        *,
+        max_tokens: int = 256,
+        temperature: float = 0.2,
+        timeout: Optional[float] = None,
+        idle_timeout: Optional[float] = None,
+        cancel_event=None,
+        should_stop=None,
+    ):  # pragma: no cover - interface
+        """Yield :class:`~giscode.providers.streaming.StreamDelta` events.
+
+        Providers that cannot stream keep this default, so callers get an
+        explicit refusal instead of a fake single-chunk stream.
+        """
+        raise ProviderError(
+            f"{self.label or self.kind} cannot stream answers.",
+            action="Use the non-streaming chat call for this provider.",
+        )
+
     # -- shared helpers ----------------------------------------------------
     def headers(self) -> dict:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
+
+    def secret_values(self) -> tuple[str, ...]:
+        """Exact secret values that must be scrubbed from outbound text.
+
+        The base provider has none; providers that hold an API key override
+        this so a prompt containing the key cannot leak it.
+        """
+        return ()
 
     def secret_free_endpoint(self) -> str:
         """Endpoint safe to log: never carries userinfo."""

@@ -2,7 +2,7 @@
 
 This is the shortest path from a clean checkout to the GisCode Core window. It
 uses the supported Python version and the repository's own dependency files.
-There is no installer, no packaged binary and no bundled model.
+A per-user Windows installer is available for the packaged build, and no model is bundled.
 
 ## 1. Check Python and Tk
 
@@ -86,8 +86,9 @@ autoload. Use it for tests and reproducibility checks, not for normal work.
   profile directory (`%USERPROFILE%\.giscode`, or the `GISCODE_HOME` directory
   you chose). This deletes configuration, chats, history, logs and snapshots.
 
-There is no uninstaller and no background service. GisCode only manages a
-`llama-server` process that it started itself.
+The packaged build has a per-user uninstaller (Windows *Apps & features*); a
+source checkout is removed by deleting its folder. There is no background
+service. GisCode only manages a `llama-server` process that it started itself.
 
 ## Where to go next
 

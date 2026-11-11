@@ -5,7 +5,11 @@ from typing import Optional
 from giscode.agentic.types import ActionType, ActionResult, ExecutionStep
 from giscode.agentic.guarded_writer import GuardedWriter
 from giscode.workspace.workspace import Workspace
-from giscode.agentic.write_safety import denied_path_reason, invalidate_bytecode, SnapshotManager
+from giscode.agentic.write_safety import (
+    SnapshotManager,
+    atomic_write_text,
+    denied_path_reason,
+)
 
 
 class ActionError(Exception):
@@ -107,10 +111,23 @@ class WorkspaceActionExecutor:
             )
         content = step.content or ""
         if self._snapshot_manager:
-            self._snapshot_manager.record_created(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        invalidate_bytecode(path)
+            self._snapshot_manager.record_created(path, self._workspace.root_path)
+        try:
+            atomic_write_text(path, content, create_only=True)
+        except FileExistsError:
+            return ActionResult(
+                action_type=ActionType.CREATE,
+                target_path=str(path),
+                success=False,
+                error=f"File already exists: {path}",
+            )
+        except OSError as exc:
+            return ActionResult(
+                action_type=ActionType.CREATE,
+                target_path=str(path),
+                success=False,
+                error=f"File could not be written atomically: {exc}",
+            )
         if self._snapshot_manager:
             self._snapshot_manager.record_written(path, self._workspace.root_path)
         return ActionResult(
@@ -133,8 +150,15 @@ class WorkspaceActionExecutor:
         content = step.content or ""
         if self._snapshot_manager:
             self._snapshot_manager.snapshot(path, self._workspace.root_path)
-        path.write_text(content, encoding="utf-8")
-        invalidate_bytecode(path)
+        try:
+            atomic_write_text(path, content)
+        except OSError as exc:
+            return ActionResult(
+                action_type=ActionType.MODIFY,
+                target_path=str(path),
+                success=False,
+                error=f"File could not be written atomically: {exc}",
+            )
         if self._snapshot_manager:
             self._snapshot_manager.record_written(path, self._workspace.root_path)
         return ActionResult(

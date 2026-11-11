@@ -9,6 +9,8 @@ import queue
 import re
 import threading
 import time
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -24,7 +26,24 @@ from giscode.gui.project_workspace import (
     ProjectWorkspaceView,
 )
 from giscode.projects.workspace import ProjectWorkspaceError
-from giscode.branding.logo import gis_logo_path, DEFAULT_LOGO_SMALL
+from giscode.branding.logo import (
+    gis_logo_path,
+    DEFAULT_LOGO_SMALL,
+    DEFAULT_LOGO_MARK,
+    DEFAULT_LOGO_MARK_LARGE,
+    APP_ICON,
+)
+from giscode.gui.design_system import (
+    DEFAULT_APPEARANCE,
+    Glyph,
+    configure_theme,
+    palette_for,
+    resolve_appearance,
+    style_input,
+    style_text,
+    draw_mark,
+)
+from giscode.gui.shell import NavigationRail
 from giscode.projects.context import ProjectContext, ProjectContextStore
 from giscode.inference.errors import RequestCancelledError
 from giscode.gui.task_report import build_change_summary, format_change_summary
@@ -39,7 +58,7 @@ from giscode.gui.text_interaction import (
 
 APP_TITLE = "GisCode"
 NAV_TABS = (
-    "Chat", "Projects", "Terminal", "Settings", "Model Manager", "History",
+    "Chat", "AI Web Chat", "Projects", "Terminal", "Settings", "Model Manager", "History",
     "Status", "iOS / xtool", "GisLogo", "Developer & Release",
     "Device Preview", "Generate Video", "Project Doctor",
     "Code Task", "Analyze", "Agent Registry",
@@ -51,6 +70,61 @@ ACTIVITY_COMPLETED = "Completed"
 ACTIVITY_CANCELLED = "Cancelled"
 ACTIVITY_FAILED = "Task failed"
 ACTIVITY_VISION_UNAVAILABLE = "Vision unavailable"
+
+
+@dataclass(frozen=True)
+class _StreamEvent:
+    """One immutable worker-to-GUI stream event.
+
+    The request and conversation ids travel with the text so a late callback
+    cannot be mistaken for output from the request currently on screen.
+    """
+
+    kind: str
+    request_id: str
+    session_id: str
+    epoch: int
+    text: str = ""
+
+
+@dataclass
+class _RequestChannel:
+    """A bounded stream channel owned by exactly one request."""
+
+    request_id: str
+    session_id: str
+    epoch: int
+    maxsize: int = 512
+    events: queue.Queue = field(init=False)
+    closed: bool = False
+
+    def __post_init__(self) -> None:
+        self.events = queue.Queue(maxsize=self.maxsize)
+
+    def put(self, event: _StreamEvent) -> bool:
+        if self.closed:
+            return False
+        try:
+            self.events.put(event, timeout=0.5)
+            return True
+        except queue.Full:
+            return False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@dataclass(frozen=True)
+class _TaskEvent:
+    """A completion/error/cancellation event with its request identity."""
+
+    kind: str
+    request_id: str
+    session_id: str
+    epoch: int
+    result: object = None
+    error: object = None
+    task: object = None
 
 # Capabilities that act on a project or workspace. A message that needs none
 # of these is ordinary conversation and must never trigger the project
@@ -162,7 +236,10 @@ class _SettingsBridge:
             raise RuntimeError("settings are not writable")
 
 
-class MainWindow:
+from giscode.gui.queue_host import QueueHost
+
+
+class MainWindow(QueueHost):
     # Task clock budget. The wall-clock task timer used to stop real work at
     # 300s; the limit is now a setting (minutes) with a per-model override and
     # a larger default for big models, and user decision time is excluded.
@@ -182,6 +259,7 @@ class MainWindow:
         # without changing the layout, and 1 400 px still has room to spare.
         self.root.minsize(1100, 700)
         self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
+        self._init_task_queue()
         self.logger = get_logger("giscode.gui")
         self._last_title_state = (None, None)
         self._last_model_load_error = ""
@@ -210,6 +288,12 @@ class MainWindow:
                 coding_agent.set_edit_approval_callback(
                     getattr(self._gisai_engine, "_approval_callback_for_run", self._approve_edit)
                 )
+        elif self._coding_agent is not None and hasattr(
+            self._coding_agent, "set_edit_approval_callback"
+        ):
+            # Core has no GisAI engine to install the callback. The same
+            # approval dialog still governs existing-file writes.
+            self._coding_agent.set_edit_approval_callback(self._approve_edit)
         self._iosxtool_service = iosxtool_service
         self._developer_setup_error = ""
         # Pro-only services. Core leaves these as None and never imports the
@@ -236,6 +320,10 @@ class MainWindow:
                 "GisCode Pro tools are not part of this build."
             )
         self._ios_xtool_view = None
+        self._ai_web_chat_view = None
+        # Compatibility alias: the ChatGPT view is now the default provider of
+        # the provider-neutral AI Web Chat surface.
+        self._chatgpt_browser_view = None
         # Pro-only: the Agent Registry pane and the service behind it. Core
         # leaves both as None and never imports giscode.agent_registry, so a
         # Core install cannot reach the registry through the window.
@@ -254,6 +342,8 @@ class MainWindow:
         self._active_gisai_task = None
         self._current_task_epoch = 0
         self._task_epoch = 0
+        self._task_request_id = ""
+        self._task_session_id = ""
         self._task_start_time = 0.0
         # Declared before the first resolve: the limit resolver reads settings.
         self._settings_manager = None
@@ -271,6 +361,21 @@ class MainWindow:
         self._model_switch_results = queue.Queue()
         self._terminal_state_until = 0.0
         self._send_cancel = threading.Event()
+        #: Streaming deltas arrive on the worker thread; the Tk thread drains
+        #: this queue in batches so a fast local model cannot flood the event
+        #: loop with one redraw per character.
+        # Bounded: a fast provider must apply backpressure rather than grow
+        # an in-memory queue faster than the Tk loop can render it.
+        self._stream_queue = queue.Queue(maxsize=512)
+        self._stream_entry = None
+        self._streamed_any = False
+        #: The conversation that started the current task. Completion and
+        #: stream callbacks must use it even after the user selects another
+        #: tab, or an old answer can be written into the new conversation.
+        self._task_chat_session = None
+        #: The channel owned by the current request. Old workers retain their
+        #: own channel and cannot deposit text into the next request's queue.
+        self._active_stream: Optional[_RequestChannel] = None
         self._pending_approvals = []
         self._closing = False
         self.root.after(100, self._approval_poll_loop)
@@ -361,6 +466,19 @@ class MainWindow:
         self.vision_status_var = tk.StringVar(value=ACTIVITY_READY)
         self._attach_strip_visible = False
 
+        # The identity is applied before the first widget is created so tk's
+        # option database gives non-ttk widgets (Text, Listbox, Canvas) a
+        # readable default from the start instead of flashing a white surface.
+        self._ui_appearance = resolve_appearance(
+            self._settings_get("ui.appearance", DEFAULT_APPEARANCE)
+        )
+        self._palette, self._fonts = configure_theme(self.root, self._ui_appearance)
+        self._attention_state = "Ready"
+        try:
+            if gis_logo_path(APP_ICON).is_file():
+                self.root.iconbitmap(default=str(gis_logo_path(APP_ICON)))
+        except Exception:
+            self.logger.debug("Application icon could not be applied", exc_info=True)
         self._build_ui()
         if self._task_manager is not None:
             self._poll_task_state()
@@ -434,6 +552,21 @@ class MainWindow:
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Exit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=file_menu)
+        self._view_menu = tk.Menu(menubar, tearoff=0)
+        self._view_menu.add_command(
+            label="Ink appearance",
+            command=lambda: self._apply_appearance("dark"),
+        )
+        self._view_menu.add_command(
+            label="Paper appearance",
+            command=lambda: self._apply_appearance("light"),
+        )
+        self._view_menu.add_separator()
+        self._view_menu.add_command(
+            label="Focus Chat",
+            command=lambda: self._select_tab("Chat"),
+        )
+        menubar.add_cascade(label="View", menu=self._view_menu)
         # Help is the discoverable entry point for the two things a user looks
         # for outside their project: how to support the work, and what this
         # build is. The About dialog repeats the support entry, so neither path
@@ -447,37 +580,87 @@ class MainWindow:
         self.root.config(menu=menubar)
 
         # Main container
-        outer = ttk.Frame(self.root)
+        self._outer = ttk.Frame(self.root, style="Gis.TFrame")
+        outer = self._outer
         outer.pack(fill=tk.BOTH, expand=True)
 
-        # ===== HEADER BAR =====
+        # A single non-flashing attention line. It carries task state at the
+        # top edge; the labelled status chip at the bottom is the accessible
+        # equivalent and the source of truth for assistive readers.
+        self._attention_strip = tk.Frame(outer, height=3, background=self._palette.surface)
+        self._attention_strip.pack(fill=tk.X, side=tk.TOP)
+
+        # ===== COMMAND BAR =====
         # Two compact rows instead of one overloaded line: the project row holds
         # everything about *which* project is open, the task row holds how the
         # assistant runs. Same widgets, same handlers, just readable.
-        header = ttk.Frame(outer, padding=(10, 8))
+        header = ttk.Frame(outer, padding=(16, 10), style="Gis.Header.TFrame")
         header.pack(fill=tk.X, side=tk.TOP)
-        brand_row = ttk.Frame(header)
+        brand_row = ttk.Frame(header, style="Gis.Header.TFrame")
         brand_row.pack(fill=tk.X)
-        task_row = ttk.Frame(header)
-        task_row.pack(fill=tk.X, pady=(6, 0))
+        task_row = ttk.Frame(header, style="Gis.Header.TFrame")
+        task_row.pack(fill=tk.X, pady=(7, 0))
 
-        # GisCode logo + branding
+        # GisCode marque + a two-line brand block. The wordmark is the product;
+        # the eyebrow names the edition without turning the header into an ad.
         try:
-            logo_path = gis_logo_path(DEFAULT_LOGO_SMALL)
+            logo_path = gis_logo_path(DEFAULT_LOGO_MARK)
             if logo_path.is_file():
                 self._logo_photo = tk.PhotoImage(file=str(logo_path))
                 self._gis_logo_photo = self._logo_photo
-                logo_label = ttk.Label(brand_row, image=self._logo_photo)
+                logo_label = ttk.Label(brand_row, image=self._logo_photo, style="Gis.Header.TLabel")
                 logo_label.pack(side=tk.LEFT, padx=(0, 10))
         except Exception:
             self._gis_logo_photo = None
 
-        ttk.Label(brand_row, text="GisCode", font=("Segoe UI", 14, "bold")).pack(side=tk.LEFT, padx=(0, 20))
+        brand_text = ttk.Frame(brand_row, style="Gis.Header.TFrame")
+        brand_text.pack(side=tk.LEFT, padx=(0, 18))
+        word_row = ttk.Frame(brand_text, style="Gis.Header.TFrame")
+        word_row.pack(anchor=tk.W)
+        ttk.Label(word_row, text="GisCode", style="Gis.Wordmark.TLabel").pack(side=tk.LEFT)
+        # The Pro marque is a real edition marker, not decoration: Core never
+        # creates it, so a Core window cannot accidentally look like Pro.
+        self._edition_badge = None
+        if edition.is_pro():
+            self._edition_badge = tk.Label(
+                word_row,
+                text=" PRO ",
+                background=self._palette.accent,
+                foreground=self._palette.on_accent,
+                font=(self._fonts.ui, 8, "bold"),
+                padx=4,
+                pady=0,
+            )
+            self._edition_badge.pack(side=tk.LEFT, padx=(7, 0))
+        self._identity_eyebrow = ttk.Label(
+            brand_text,
+            text=f"{edition.edition().upper()} EDITION",
+            style="Gis.Eyebrow.TLabel",
+        )
+        self._identity_eyebrow.pack(anchor=tk.W, pady=(0, 2))
 
-        # GisAI lead indicator
-        self._gisai_header_label = ttk.Label(brand_row, text="GisAI — Ready", font=("Segoe UI", 10, "bold"), foreground="#0066CC")
-        self._gisai_header_label.pack(side=tk.LEFT, padx=(0, 20))
+        # GisAI lead indicator. It states the runtime truth: an absent or
+        # disabled engine is never shown as "Powered", and Core never claims
+        # Pro-only GisAI capability. The spark icon is the shared vector glyph.
+        self._gisai_indicator = tk.Frame(brand_row, background=self._palette.surface)
+        self._gisai_indicator.pack(side=tk.LEFT, padx=(0, 18))
+        self._gisai_icon = Glyph(
+            self._gisai_indicator,
+            "spark",
+            self._palette,
+            size=15,
+            background=self._palette.surface,
+        )
+        self._gisai_icon.pack(side=tk.LEFT, padx=(0, 5))
+        self._gisai_header_label = ttk.Label(
+            self._gisai_indicator,
+            text="GisAI",
+            style="Gis.Header.TLabel",
+            foreground=self._palette.teal,
+        )
+        self._gisai_header_label.pack(side=tk.LEFT)
         make_value_copyable(self._gisai_header_label)
+        self._set_gisai_indicator()
 
         # ===== AUTHORITATIVE PROJECT CONTROL AREA =====
         # This header group is the single place project selection and the
@@ -488,36 +671,65 @@ class MainWindow:
         # was invisible to the other, so "Open" reported "Select a project from
         # the list first". The Projects tab now shows a read-only reflection of
         # this state instead of a second picker.
-        ttk.Label(brand_row, text="Project:").pack(side=tk.LEFT, padx=(10, 5))
+        ttk.Label(brand_row, text="PROJECT", style="Gis.Eyebrow.TLabel").pack(side=tk.LEFT, padx=(8, 6))
         self._project_var = tk.StringVar()
-        self._project_combo = ttk.Combobox(brand_row, textvariable=self._project_var, state="readonly", width=35)
+        self._project_combo = ttk.Combobox(
+            brand_row,
+            textvariable=self._project_var,
+            state="readonly",
+            width=35,
+            style="Gis.TCombobox",
+        )
         self._project_combo.pack(side=tk.LEFT, padx=(0, 10))
         self._project_combo.bind("<<ComboboxSelected>>", self._on_project_selection)
         self._refresh_project_list()
 
-        ttk.Button(brand_row, text="+ New Project", command=self._on_new_project).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(
+            brand_row,
+            text="+ New Project",
+            command=self._on_new_project,
+            style="Gis.Accent.TButton",
+        ).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(
             brand_row,
             text="Open Existing…",
             command=self._on_open_existing_project,
+            style="Gis.TButton",
         ).pack(side=tk.LEFT, padx=(0, 5))
         # "Open", "Switch" and "Close" are no longer header controls. Activating
         # and closing a project are project actions, so they live with the
         # project workspace in the Projects tab; the header keeps selection and
         # creation. Both actions are still one click away and unchanged.
-        ttk.Button(brand_row, text="Settings", command=self._on_project_settings).pack(side=tk.LEFT, padx=(0, 20))
+        ttk.Button(
+            brand_row,
+            text="Settings",
+            command=self._on_project_settings,
+            style="Gis.Ghost.TButton",
+        ).pack(side=tk.LEFT, padx=(0, 20))
 
         # Assistant mode selector
-        ttk.Label(task_row, text="Mode:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(task_row, text="MODE", style="Gis.Eyebrow.TLabel").pack(side=tk.LEFT, padx=(0, 6))
         self._assistant_mode_var = tk.StringVar(value="Assistant")
-        assistant_combo = ttk.Combobox(task_row, textvariable=self._assistant_mode_var, state="readonly", width=18,
-                                       values=["Assistant", "Planner", "Coder", "Reviewer"])
+        assistant_combo = ttk.Combobox(
+            task_row,
+            textvariable=self._assistant_mode_var,
+            state="readonly",
+            width=18,
+            values=["Assistant", "Planner", "Coder", "Reviewer"],
+            style="Gis.TCombobox",
+        )
         assistant_combo.pack(side=tk.LEFT, padx=(0, 12))
 
         # Model selector
-        ttk.Label(task_row, text="Model:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(task_row, text="MODEL", style="Gis.Eyebrow.TLabel").pack(side=tk.LEFT, padx=(0, 6))
         self._model_var = tk.StringVar(value="Auto" if self._model_manager is not None else "None")
-        self._model_combo = ttk.Combobox(task_row, textvariable=self._model_var, state="readonly", width=22)
+        self._model_combo = ttk.Combobox(
+            task_row,
+            textvariable=self._model_var,
+            state="readonly",
+            width=22,
+            style="Gis.TCombobox",
+        )
         self._model_combo.pack(side=tk.LEFT, padx=(0, 12))
         self._model_combo.bind("<<ComboboxSelected>>", self._on_model_selected)
         self.chat_model_combo = self._model_combo  # For test compatibility
@@ -525,7 +737,12 @@ class MainWindow:
 
         # Action buttons. Model Manager stays in Core: choosing and switching
         # models is a Core feature. The three advanced actions are Pro-only.
-        ttk.Button(task_row, text="Model Manager", command=self._on_model_manager).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(
+            task_row,
+            text="Model Manager",
+            command=self._on_model_manager,
+            style="Gis.Ghost.TButton",
+        ).pack(side=tk.LEFT, padx=(0, 5))
         self.custom_logo_btn = None
         self.self_improvement_btn = None
         self.project_doctor_btn = None
@@ -540,12 +757,23 @@ class MainWindow:
             self.custom_logo_btn.pack(side=tk.LEFT, padx=(0, 5))
         # Stop belongs to the running task, not to the project, so it sits at the
         # end of the task row where it cannot be mistaken for a project action.
-        self.header_stop_btn = ttk.Button(task_row, text="Stop", command=self._revoke_task, state=tk.DISABLED)
+        self.header_stop_btn = ttk.Button(
+            task_row,
+            text="Stop",
+            command=self._revoke_task,
+            state=tk.DISABLED,
+            style="Gis.Danger.TButton",
+        )
         self.header_stop_btn.pack(side=tk.RIGHT, padx=(8, 0))
 
-        # ===== MAIN CONTENT: NOTEBOOK =====
-        self._notebook = ttk.Notebook(outer)
-        self._notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
+        # ===== MAIN CONTENT: RAIL + ONE NOTEBOOK =====
+        body = ttk.Frame(outer, style="Gis.TFrame")
+        body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(10, 8))
+        content = ttk.Frame(body, style="Gis.TFrame")
+        content.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self._notebook = ttk.Notebook(content, style="Gis.TNotebook")
+        self._notebook.pack(fill=tk.BOTH, expand=True)
+        self._nav = None
 
         # Tab frames. Order is the visible navigation order: the workspace the
         # user actually works in comes first, and the panes that only point at
@@ -556,6 +784,7 @@ class MainWindow:
         # directly. Pro keeps every builder; Core simply never calls the rest.
         builders = {
             "Chat": self._create_chat_tab,
+            "AI Web Chat": self._create_ai_web_chat_tab,
             "Projects": self._create_projects_tab,
             "Terminal": self._create_terminal_tab,
             "Settings": self._create_settings_tab,
@@ -586,19 +815,87 @@ class MainWindow:
                 self.logger.warning("Tab %s is unavailable: %s", tab_name, exc)
                 self._add_unavailable_tab(tab_name, exc)
 
-        # Status bar at bottom
-        status_bar = ttk.Frame(outer, relief=tk.SUNKEN, padding=(5, 2))
-        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
-        status_label = ttk.Label(status_bar, textvariable=self._status_var)
+        # The rail is built after the edition has decided which pages exist, so
+        # it can never advertise a destination this build did not create.
+        self._nav = NavigationRail(
+            body,
+            window=self,
+            palette=self._palette,
+            fonts=self._fonts,
+            tabs=list(self._tab_frames.keys()),
+            select=self._select_tab,
+            toggle_appearance=self._toggle_appearance,
+            edition_label=f"{edition.edition().upper()} EDITION",
+        )
+        self._nav.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 14), before=content)
+        # Tk's Notebook can keep drawing its tab strip even when the style layout
+        # is replaced, depending on the platform theme. Hiding each tab removes
+        # the duplicate strip while preserving the notebook, tab ids, frame
+        # ownership and programmatic selection used by callers and tests.
+        for tab_frame in self._tab_frames.values():
+            try:
+                self._notebook.hide(tab_frame)
+            except tk.TclError:
+                self.logger.debug("Notebook tab could not be hidden", exc_info=True)
+
+        # Status bar at bottom. The pill is the accessible statement of task
+        # state; the top strip is only a secondary colour cue.
+        status_bar = ttk.Frame(outer, style="Gis.Status.TFrame", padding=(12, 6))
+        # Pack before the expanding body. Packing it afterwards left the
+        # status bar (and its labelled attention chip) in a zero-height cavity.
+        status_bar.pack(fill=tk.X, side=tk.BOTTOM, before=body)
+        self._attention_chip = ttk.Label(
+            status_bar,
+            text="●  READY",
+            style="Gis.Pill.Ready.TLabel",
+        )
+        self._attention_chip.pack(side=tk.LEFT, padx=(0, 10))
+        status_label = ttk.Label(status_bar, textvariable=self._status_var, style="Gis.Header.TLabel")
         status_label.pack(side=tk.LEFT)
         make_value_copyable(status_label, self._status_var.get)
-        model_status_label = ttk.Label(status_bar, textvariable=self._model_status_var)
+        model_status_label = ttk.Label(
+            status_bar,
+            textvariable=self._model_status_var,
+            style="Gis.CardMuted.TLabel",
+        )
         model_status_label.pack(side=tk.RIGHT)
         make_value_copyable(model_status_label, self._model_status_var.get)
+        ttk.Label(status_bar, text="LOCAL · PRIVATE", style="Gis.Eyebrow.TLabel").pack(
+            side=tk.RIGHT, padx=(0, 14)
+        )
+
+        # Keyboard parity with the rail; the visible shortcut hints are real.
+        for index, tab_name in enumerate(list(self._tab_frames)[:9]):
+            self.root.bind_all(
+                f"<Alt-Key-{index + 1}>",
+                lambda _event, name=tab_name: self._select_tab(name),
+            )
+
+        # Ctrl+Tab walks the pages in rail order and Ctrl+Shift+Tab walks back,
+        # wrapping at both ends. The notebook stays the single navigation
+        # surface: this only changes which page it shows, and _select_tab keeps
+        # the rail's highlight in step. Windows reports Shift+Tab as
+        # ISO_Left_Tab in some builds, so both names are bound for the reverse
+        # direction rather than leaving it dead on those machines.
+        for sequence, step in (
+            ("<Control-Tab>", 1),
+            ("<Control-Shift-Tab>", -1),
+            ("<Control-ISO_Left_Tab>", -1),
+        ):
+            command = lambda _event, delta=step: self._cycle_tab(delta)  # noqa: E731
+            # Bound on the toplevel, which every child widget inherits as a
+            # bindtag, rather than bind_all: Tk resolves Ctrl+Tab through the
+            # <<NextWindow>> virtual event in the "all" tag, so a bind_all
+            # handler for the physical sequence never runs. The notebook's own
+            # class binding is replaced too, otherwise Ttk's CycleTab would
+            # move the page behind the rail and leave the highlight stale.
+            self.root.bind(sequence, command)
+            self.root.bind_class("TNotebook", sequence, command)
 
         # Land on the task workspace rather than whichever tab happened to be
-        # built first. Everything else stays one click away in the strip.
+        # built first. Everything else stays one click away in the rail.
         self._select_tab("Chat")
+        self._set_attention("Ready")
 
         self.logger.info("MainWindow initialized")
         self._bind_mousewheel()
@@ -763,9 +1060,15 @@ class MainWindow:
         the only action is handing a URL to the operating system's browser.
         """
         from giscode import support
+        from giscode.config.settings import DEFAULT_CONFIG
 
+        # SettingsManager reads only the profile file, so a fresh profile has
+        # no "support" section at all. Fall back to the shipped page instead of
+        # reporting the button unconfigured on every new install; a setting that
+        # is explicitly empty still disables it.
+        shipped_page = DEFAULT_CONFIG.get("support", {}).get("sponsors_url", "")
         url = support.sponsors_url(
-            lambda key, default=None: self._settings_get(key, default)
+            lambda key, default=None: self._settings_get(key, shipped_page)
         )
         if not url:
             messagebox.showinfo(
@@ -786,30 +1089,80 @@ class MainWindow:
         window = tk.Toplevel(self.root)
         window.title("About GisCode")
         window.transient(self.root)
-        frame = ttk.Frame(window, padding=16)
+        window.configure(background=self._palette.bg)
+        frame = ttk.Frame(window, padding=22, style="Gis.TFrame")
         frame.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(frame, text=APP_TITLE, font=("Segoe UI", 14, "bold")).pack(
-            anchor=tk.W
-        )
-        ttk.Label(frame, text=f"Edition: {edition.edition()}").pack(
-            anchor=tk.W, pady=(4, 0)
-        )
+        identity = ttk.Frame(frame, style="Gis.TFrame")
+        identity.pack(fill=tk.X, pady=(0, 14))
+        try:
+            mark_path = gis_logo_path(DEFAULT_LOGO_MARK_LARGE)
+            if mark_path.is_file():
+                # The authentic 620 px artwork is subsampled by an integer
+                # factor, so the star keeps its proportions and stays sharp.
+                photo = tk.PhotoImage(file=str(mark_path))
+                factor = 4 if photo.width() >= 600 else 1
+                if factor > 1:
+                    photo = photo.subsample(factor, factor)
+                self._about_mark_photo = photo
+                ttk.Label(identity, image=self._about_mark_photo, style="Gis.TLabel").pack(
+                    side=tk.LEFT, padx=(0, 14)
+                )
+        except Exception:
+            self._about_mark_photo = None
+        title_block = ttk.Frame(identity, style="Gis.TFrame")
+        title_block.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(title_block, text=APP_TITLE, style="Gis.Display.TLabel").pack(anchor=tk.W)
+        ttk.Label(
+            title_block,
+            text="LOCAL ENGINEERING PARTNER",
+            style="Gis.Accent.TLabel",
+        ).pack(anchor=tk.W, pady=(2, 0))
+        ttk.Label(
+            title_block,
+            text=f"Edition: {edition.edition()}",
+            style="Gis.Muted.TLabel",
+        ).pack(anchor=tk.W, pady=(6, 0))
+        ttk.Separator(frame, orient=tk.HORIZONTAL, style="Gis.TSeparator").pack(fill=tk.X, pady=(0, 12))
         ttk.Label(
             frame,
-            text="Runs on this machine. Your code and prompts stay here.",
-        ).pack(anchor=tk.W, pady=(4, 12))
-        buttons = ttk.Frame(frame)
+            text="Direct answers, visible evidence, and no claim of success before verification.",
+            style="Gis.TLabel",
+            wraplength=480,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            frame,
+            text="Runs on this machine. Your code, prompts and task evidence stay here.",
+            style="Gis.Muted.TLabel",
+            wraplength=480,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(6, 16))
+        buttons = ttk.Frame(frame, style="Gis.TFrame")
         buttons.pack(fill=tk.X)
         support_button = ttk.Button(
             buttons,
             text="Support the Developer",
             command=self._on_support_developer,
+            style="Gis.TButton",
         )
         support_button.pack(side=tk.LEFT)
-        ttk.Button(buttons, text="Close", command=window.destroy).pack(side=tk.RIGHT)
+        ttk.Button(
+            buttons,
+            text="Close",
+            command=window.destroy,
+            style="Gis.Accent.TButton",
+        ).pack(side=tk.RIGHT)
         self._about_window = window
         self._about_support_button = support_button
         return window
+
+    def _on_appearance_choice(self, _event=None) -> None:
+        target = "light" if "paper" in self._appearance_var.get().lower() else "dark"
+        self._apply_appearance(target)
+
+    def _save_attention_preference(self) -> None:
+        self._settings_set("ui.attention", bool(self._attention_pref_var.get()))
+        self._set_attention(getattr(self, "_attention_state", "Ready"))
 
     # ===== HEADER HELPERS =====
     # What the header Project field shows when no project is active. It used
@@ -918,6 +1271,11 @@ class MainWindow:
 
     def _sync_project_workspace_display(self) -> None:
         """Push the authoritative selection into the Projects tab display."""
+        # Recovery must follow the same selection as the workspace, including
+        # when the project is opened from the header rather than this tab.
+        panel = getattr(self, "_recovery_panel", None)
+        if panel is not None:
+            panel.set_project(getattr(self._active_project_context, "root_path", None))
         view = getattr(self, "_project_workspace_view", None)
         if view is None:
             return
@@ -1204,10 +1562,164 @@ class MainWindow:
             "and free. It is not available in this edition.",
         )
 
+    def _cycle_tab(self, step: int) -> str:
+        """Select the page ``step`` places from the current one, wrapping.
+
+        This is the keyboard equivalent of the navigation rail: same order,
+        same pages, same single notebook. ``"break"`` stops Tk from also
+        moving focus traversal, which would otherwise fight the selection.
+        """
+        order = list(self._tab_frames)
+        if len(order) < 2:
+            return "break"
+        try:
+            current = self._notebook.tab(self._notebook.select(), "text")
+        except tk.TclError:
+            current = order[0]
+        try:
+            index = order.index(current)
+        except ValueError:
+            index = 0
+        self._select_tab(order[(index + step) % len(order)])
+        return "break"
+
     def _select_tab(self, name: str) -> None:
         frame = self._tab_frames.get(name)
         if frame is not None:
             self._notebook.select(frame)
+            nav = getattr(self, "_nav", None)
+            if nav is not None:
+                nav.set_active(name)
+
+    def _toggle_appearance(self) -> None:
+        target = "light" if getattr(self, "_ui_appearance", "dark") == "dark" else "dark"
+        self._apply_appearance(target)
+
+    def _apply_appearance(self, appearance: str) -> None:
+        """Switch themes without recreating pages, tasks or conversation state."""
+        target = resolve_appearance(appearance)
+        if target == getattr(self, "_ui_appearance", None):
+            return
+        old = getattr(self, "_palette", palette_for(target))
+        self._ui_appearance = target
+        self._palette, self._fonts = configure_theme(self.root, target)
+        self._settings_set("ui.appearance", target)
+        self._retheme_tk_tree(self.root, old, self._palette)
+        if hasattr(self, "response_text"):
+            style_text(self.response_text, self._palette, self._fonts)
+            self.response_text.tag_raise("question")
+        if hasattr(self, "task_entry"):
+            style_input(self.task_entry, self._palette, self._fonts)
+        nav = getattr(self, "_nav", None)
+        if nav is not None:
+            nav.palette = self._palette
+            nav.fonts = self._fonts
+            nav.refresh()
+        self._set_attention(getattr(self, "_attention_state", "Ready"))
+        if hasattr(self, "_appearance_var"):
+            self._appearance_var.set("Paper (light)" if target == "light" else "Ink (dark)")
+
+    def _retheme_tk_tree(self, parent, old, new) -> None:
+        """Carry non-ttk widgets across a live theme switch.
+
+        ttk styles update globally. tk widgets keep the colours they were
+        created with, so only the known neutral surface/text colours are
+        translated; semantic status colours are deliberately left alone.
+        """
+        background_map = {
+            old.bg: new.bg,
+            old.surface: new.surface,
+            old.raised: new.raised,
+            old.overlay: new.overlay,
+            old.code_bg: new.code_bg,
+        }
+        foreground_map = {old.text: new.text, old.muted: new.muted, old.faint: new.faint}
+        for child in list(parent.winfo_children()):
+            for option, mapping in (("background", background_map), ("foreground", foreground_map)):
+                try:
+                    current = str(child.cget(option))
+                except Exception:
+                    continue
+                if current in mapping:
+                    try:
+                        child.configure(**{option: mapping[current]})
+                    except Exception:
+                        pass
+            self._retheme_tk_tree(child, old, new)
+
+    def _set_gisai_indicator(self, status_text: str = "") -> None:
+        """State-accurate GisAI indicator for the current edition.
+
+        ``Powered`` is Pro's identity only while a GisAI engine is actually
+        present and enabled. An absent or disabled engine is reported as such
+        in both editions, and Core never displays the Pro-only Powered claim.
+        """
+        engine = getattr(self, "_gisai_engine", None)
+        enabled = getattr(engine, "enabled", True) if engine is not None else False
+        if engine is None:
+            text, colour = "GisAI · Unavailable", self._palette.faint
+            powered = False
+        elif enabled is False:
+            text, colour = "GisAI · Disabled", self._palette.faint
+            powered = False
+        else:
+            powered = True
+            label = str(status_text or "Ready").strip()
+            text = "GisAI Powered" if edition.is_pro() else f"GisAI · {label}"
+            colour = self._palette.teal
+        self._gisai_powered = powered
+        self._gisai_indicator_text = text
+        label_widget = getattr(self, "_gisai_header_label", None)
+        if label_widget is not None:
+            try:
+                label_widget.configure(text=text, foreground=colour)
+            except tk.TclError:
+                pass
+        icon = getattr(self, "_gisai_icon", None)
+        if icon is not None:
+            try:
+                icon.set_palette(self._palette, self._palette.surface)
+            except tk.TclError:
+                pass
+
+    def _set_attention(self, state: str) -> None:
+        """A single, stable attention state -- never a flashing animation."""
+        raw = str(state or "Ready")
+        key = raw.strip().lower().replace("_", " ")
+        display, style_name, colour = {
+            "working": ("Working", "Working", self._palette.accent),
+            "stopping": ("Stopping", "Stopping", self._palette.warning),
+            "completed": ("Completed", "Completed", self._palette.teal),
+            "cancelled": ("Cancelled", "Cancelled", self._palette.cancelled),
+            "stopped": ("Cancelled", "Cancelled", self._palette.cancelled),
+            "timeout": ("Timed out", "TimedOut", self._palette.warning),
+            "timed out": ("Timed out", "TimedOut", self._palette.warning),
+            "failed": ("Failed", "Failed", self._palette.danger),
+            "error": ("Failed", "Failed", self._palette.danger),
+            "waiting": ("Needs input", "Working", self._palette.accent),
+            "idle": ("Ready", "Ready", self._palette.success),
+            "ready": ("Ready", "Ready", self._palette.success),
+        }.get(key, (raw.capitalize() or "Ready", "Idle", self._palette.muted))
+        self._attention_state = display
+        attention_enabled = bool(self._settings_get("ui.attention", True))
+        chip = getattr(self, "_attention_chip", None)
+        if chip is not None:
+            try:
+                chip.configure(
+                    text=f"●  {display.upper()}",
+                    style=f"Gis.Pill.{style_name}.TLabel" if attention_enabled else "Gis.Pill.Idle.TLabel",
+                )
+            except tk.TclError:
+                pass
+        strip = getattr(self, "_attention_strip", None)
+        if strip is not None:
+            try:
+                strip.configure(background=colour if attention_enabled else self._palette.surface)
+            except tk.TclError:
+                pass
+        nav = getattr(self, "_nav", None)
+        if nav is not None:
+            nav.set_attention(display)
 
     # ===== CONVERSATION HISTORY =====
     def _conversation_label(self, chat) -> str:
@@ -1348,6 +1860,29 @@ class MainWindow:
             self._current_chat_index = max(0, len(self._chat_sessions) - 1)
         return self._chat_sessions[self._current_chat_index]
 
+    def _session_id_for(self, session) -> str:
+        """Return the immutable id of one in-memory conversation."""
+        if session is None:
+            return ""
+        session_id = str(session.get("session_id") or session.get("chat_id") or "")
+        if not session_id:
+            # A hand-built session (UI tests or an old in-memory object) still
+            # needs a stable identity. The object identity is immutable for the
+            # lifetime of that session and is never reused by a new chat.
+            session_id = f"session-{id(session)}"
+            session["session_id"] = session_id
+        return session_id
+
+    def _session_is_open(self, session) -> bool:
+        """True only while *session* is still one of the open conversations."""
+        return session is not None and any(item is session for item in self._chat_sessions)
+
+    def _session_open_by_id(self, session_id: str) -> bool:
+        return any(
+            self._session_id_for(item) == str(session_id)
+            for item in self._chat_sessions
+        )
+
     def _ensure_chat_session(self) -> None:
         """Ensure there's at least one chat session, creating one if needed."""
         if not self._chat_sessions:
@@ -1405,15 +1940,27 @@ class MainWindow:
         for item in session.get("history", []):
             role = item.get("role", "user")
             content = item.get("content", "")
-            self.response_text.insert(tk.END, f"{role}: {content}\n")
-            if role == "assistant" and content:
+            if role == "user":
+                self.response_text.insert(tk.END, "YOU\n", ("user_name",))
+                self.response_text.insert(tk.END, f"{content}\n", ("user",))
+            elif role == "assistant":
+                asks = self._content_is_question(content)
+                name_tag = "question_name" if asks else "agent_name"
+                body_tag = "question" if asks else self._conversation_body_tag(content)
+                label = "GISCODE ASKS" if asks else "GISCODE"
+                self.response_text.insert(tk.END, f"{label}\n", (name_tag,))
+                self.response_text.insert(tk.END, f"{content}\n", (body_tag,))
                 button = ttk.Button(
                     self.response_text,
                     text="Copy",
                     command=lambda value=content: self._copy_chat_response(value),
+                    style="Gis.Ghost.TButton",
                 )
                 self.response_text.window_create(tk.END, window=button)
                 self.response_text.insert(tk.END, "\n")
+            else:
+                self.response_text.insert(tk.END, f"{role.upper()}\n", ("muted",))
+                self.response_text.insert(tk.END, f"{content}\n", ("tool",))
             self.response_text.insert(tk.END, "\n")
         self.response_text.config(state=tk.NORMAL)
         self.response_text.see(tk.END)
@@ -1423,6 +1970,10 @@ class MainWindow:
         self._attach_strip_visible = bool(session.get("images", []))
 
     def _new_chat(self) -> None:
+        if self._active_task:
+            # Stop into the chat that owns the request before selecting the
+            # new one. The partial answer and its callbacks stay there.
+            self._revoke_task()
         self._save_chat_session()
         # Create new chat in ChatStore with "daily" scope
         chat = self._chat_store.create_chat("daily", "", f"Chat {len(self._chat_sessions) + 1}")
@@ -1448,8 +1999,12 @@ class MainWindow:
     def _close_chat(self, index: int) -> None:
         if len(self._chat_sessions) == 1:
             return
-        # Optionally delete from ChatStore
+        # Closing the conversation that owns the request cancels it before
+        # its session leaves the open list. A different chat is untouched.
         session = self._chat_sessions[index]
+        if self._active_task and session is self._task_chat_session:
+            self._revoke_task()
+        # Optionally delete from ChatStore
         chat_id = session.get("chat_id")
         if chat_id:
             try:
@@ -1501,8 +2056,8 @@ class MainWindow:
                 except Exception as e:
                     self.logger.warning(f"Failed to save chat session to ChatStore: {e}")
 
-    def _append_history(self, role: str, content: str) -> None:
-        session = self._current_chat_session()
+    def _append_history(self, role: str, content: str, session=None) -> None:
+        session = session or self._current_chat_session()
         session.setdefault("history", []).append({"role": role, "content": content})
         session["text"] = "\n".join(
             item["content"] for item in session["history"] if item["role"] == "assistant"
@@ -1514,10 +2069,117 @@ class MainWindow:
                 self._chat_store.append_message(chat_id, role, content)
             except Exception as e:
                 self.logger.warning(f"Failed to append message to ChatStore: {e}")
-        self._render_current_chat()
+        if session is self._current_chat_session():
+            self._render_current_chat()
+
+    @staticmethod
+    def _content_is_question(content: str) -> bool:
+        body = str(content or "").strip()
+        if not body or len(body) > 700:
+            return False
+        lowered = body.lower()
+        return (
+            body.endswith("?")
+            or "needs your decision" in lowered
+            or lowered.startswith(("which ", "should ", "do you want", "choose ", "confirm "))
+        )
+
+    @staticmethod
+    def _conversation_body_tag(content: str) -> str:
+        body = str(content or "")
+        if "```" in body:
+            return "code"
+        if "Verification" in body and ("Changed" in body or "Evidence" in body):
+            return "report"
+        if body.lstrip().startswith("[") and len(body) < 500:
+            return "tool"
+        if body.lower().startswith(("error", "failed", "failure")):
+            return "error"
+        return "agent"
 
     def _append_response(self, content: str) -> None:
         self._append_history("assistant", content)
+
+    def _stream_push(self, piece: str, *, channel=None) -> None:
+        """Put one immutable delta on the channel owned by its request."""
+        ch = channel or self._active_stream
+        if ch is None or ch.closed:
+            return
+        event = _StreamEvent("delta", ch.request_id, ch.session_id, ch.epoch, str(piece))
+        try:
+            if not ch.put(event):
+                self.logger.warning("Stream display queue is full; discarding a delta.")
+        except Exception:  # noqa: BLE001 - a display queue must not break a task
+            pass
+
+    def _take_stream_events(self, channel=None, limit: int = 512) -> list[_StreamEvent]:
+        """Drain a request channel without blocking the Tk thread."""
+        ch = channel or self._active_stream
+        if ch is None:
+            return []
+        events: list[_StreamEvent] = []
+        while len(events) < limit:
+            try:
+                item = ch.events.get_nowait()
+            except Exception:
+                break
+            if isinstance(item, _StreamEvent):
+                events.append(item)
+            else:
+                # Compatibility with a raw queue item from a direct test or an
+                # older embedded caller: attribute it to this known channel.
+                events.append(
+                    _StreamEvent("delta", ch.request_id, ch.session_id, ch.epoch, str(item))
+                )
+        return events
+
+    def _take_stream_text(self, limit: int = 512) -> str:
+        """Return only the text from the active channel, for compatibility."""
+        return "".join(event.text for event in self._take_stream_events(limit=limit))
+
+    def _drain_stream(self, epoch: int) -> None:
+        """Move current-request deltas into its conversation, batched.
+
+        The channel, request id, and session id must all still match. Queued
+        text from an earlier request is therefore rejected even if it was
+        already waiting when New Chat switched the visible conversation.
+        """
+        channel = self._active_stream
+        if (
+            channel is None
+            or channel.closed
+            or epoch != self._task_epoch
+            or channel.epoch != epoch
+            or channel.request_id != self._task_request_id
+            or not self._active_task
+        ):
+            return
+        events = self._take_stream_events(channel)
+        if events:
+            session = self._task_chat_session
+            if not self._session_is_open(session):
+                channel.close()
+                return
+            for event in events:
+                if (
+                    event.request_id != channel.request_id
+                    or event.session_id != self._task_session_id
+                    or not event.text
+                ):
+                    continue
+                if self._stream_entry is None:
+                    entry = {"role": "assistant", "content": event.text}
+                    session.setdefault("history", []).append(entry)
+                    self._stream_entry = entry
+                else:
+                    self._stream_entry["content"] = str(
+                        self._stream_entry.get("content", "")
+                    ) + event.text
+                self._streamed_any = True
+            if session is self._current_chat_session():
+                self._render_current_chat()
+        if self._active_task and epoch == self._task_epoch and not channel.closed:
+            self.root.after(40, lambda: self._drain_stream(epoch))
 
     def _copy_chat_response(self, content: str) -> None:
         try:
@@ -1782,6 +2444,79 @@ class MainWindow:
             return False
         return getattr(getattr(model, "state", None), "value", "") == "loading"
 
+    def _queue_execute_item(self, item, cancel_event, on_status):
+        """Run one queued request through Core's existing single-task path.
+
+        The queue worker calls this off the GUI thread, so the request is
+        inserted and sent via ``after``. The outcome is derived from the task
+        manager's terminal status; an unknown status is a failure, never a
+        success.
+        """
+        from giscode.task_control.queue import QueueStatus
+
+        done = threading.Event()
+        outcome: dict = {}
+        epoch_before = getattr(self, "_task_epoch", 0)
+
+        def finish(status, error="", result=""):
+            if done.is_set():
+                return
+            outcome.update(status=status, error=error, result=result)
+            done.set()
+
+        def poll():
+            if cancel_event.is_set() and getattr(self, "_active_task", False):
+                try:
+                    self._revoke_task()
+                except Exception:
+                    pass
+            if getattr(self, "_active_task", False):
+                self.root.after(250, poll)
+                return
+            last = None
+            try:
+                if self._task_manager is not None:
+                    last = self._task_manager.get_last_task()
+            except Exception:
+                last = None
+            value = getattr(getattr(last, "status", None), "value", "") if last is not None else ""
+            if cancel_event.is_set() or value == "cancelled":
+                finish(QueueStatus.CANCELLED, "Stopped by the user.")
+            elif value == "completed":
+                finish(QueueStatus.COMPLETED, result=self._status_var.get())
+            elif value in ("failed", "timeout"):
+                info = getattr(last, "failure_info", None) or {}
+                finish(QueueStatus.FAILED, str(info.get("message") or "The task failed."))
+            else:
+                finish(
+                    QueueStatus.FAILED,
+                    self._status_var.get()
+                    or "No terminal task status was recorded; success is not claimed.",
+                )
+
+        def start():
+            try:
+                self.task_entry.delete("1.0", "end")
+                self.task_entry.insert("1.0", item.prompt)
+                self._send_task()
+            except Exception as exc:  # noqa: BLE001 - report, never claim success
+                finish(QueueStatus.FAILED, repr(exc))
+                return
+            if (
+                not getattr(self, "_active_task", False)
+                and getattr(self, "_task_epoch", 0) == epoch_before
+            ):
+                finish(
+                    QueueStatus.FAILED,
+                    self._status_var.get() or "The task was not started.",
+                )
+                return
+            self.root.after(250, poll)
+
+        self.root.after(0, start)
+        done.wait()
+        return outcome
+
     def _send_task(self, _event=None) -> str:
         message = self.task_entry.get("1.0", "end-1c").strip()
         if not message:
@@ -1829,11 +2564,28 @@ class MainWindow:
 
         attachments = self._build_attachments(self._current_chat_session().get("images", []))
         self.task_entry.delete("1.0", tk.END)
-        self._current_chat_session()["draft"] = ""
+        session = self._current_chat_session()
+        session["draft"] = ""
         self._append_history("user", message)
+        self._task_chat_session = session
+        self._task_session_id = self._session_id_for(session)
         self._active_task = True
         self._task_epoch += 1
         epoch = self._task_epoch
+        request_id = f"gui-{epoch}-{uuid.uuid4().hex}"
+        cancel_event = threading.Event()
+        previous = self._active_stream
+        if previous is not None:
+            previous.close()
+        channel = _RequestChannel(request_id, self._task_session_id, epoch)
+        self._task_request_id = request_id
+        self._active_stream = channel
+        self._stream_queue = channel.events
+        # Each request owns its cancellation event. Creating the next request
+        # never clears the event held by the previous worker.
+        self._send_cancel = cancel_event
+        self._stream_entry = None
+        self._streamed_any = False
         self._current_task_epoch = epoch
         self._task_start_time = time.time()
         # Resolve the budget per task: the loaded model (and therefore the
@@ -1850,11 +2602,20 @@ class MainWindow:
                 pass
         self._send_thread = threading.Thread(
             target=self._run_task,
-            args=(message, attachments, epoch),
+            args=(
+                message,
+                attachments,
+                epoch,
+                request_id,
+                self._task_session_id,
+                cancel_event,
+                channel,
+            ),
             daemon=True,
         )
         self._send_thread.start()
         self.root.after(25, lambda: self._drain_worker_result(epoch))
+        self.root.after(40, lambda: self._drain_stream(epoch))
         return "break"
 
     def _task_requires_project(self, message: str) -> bool:
@@ -1998,9 +2759,11 @@ class MainWindow:
             or state == "waiting_input"
         )
 
-    def _run_task(self, message, attachments, epoch: int) -> None:
+    def _run_task(self, message, attachments, epoch: int, request_id: str, session_id: str, cancel_event, channel) -> None:
         if self._gisai_engine is None:
-            self._run_core_task(message, epoch, attachments)
+            self._run_core_task(
+                message, epoch, attachments, request_id, session_id, cancel_event, channel
+            )
             return
         try:
             task = self._gisai_engine.receive(
@@ -2009,14 +2772,51 @@ class MainWindow:
                 project_context=self._active_project_context,
             )
             if self._waiting_input(task):
-                self._worker_results[epoch] = (None, None, epoch, task)
+                self._worker_results[epoch] = _TaskEvent(
+                    "waiting_input", request_id, session_id, epoch, task=task
+                )
                 return
             result = self._gisai_engine.execute(task, on_status=lambda message: self._on_task_status(message, epoch))
-            self._worker_results[epoch] = (result, None, epoch, task)
+            self._worker_results[epoch] = _TaskEvent(
+                self._task_result_kind(result, None, task),
+                request_id,
+                session_id,
+                epoch,
+                result=result,
+                task=task,
+            )
         except Exception as exc:
-            self._worker_results[epoch] = (None, exc, epoch, None)
+            self._worker_results[epoch] = _TaskEvent(
+                "cancelled" if isinstance(exc, RequestCancelledError) else "error",
+                request_id,
+                session_id,
+                epoch,
+                error=exc,
+            )
 
-    def _run_core_task(self, message, epoch: int, attachments=None) -> None:
+    @staticmethod
+    def _task_result_kind(result, error, task=None) -> str:
+        if isinstance(error, RequestCancelledError):
+            return "cancelled"
+        if error is not None:
+            return "error"
+        if isinstance(result, dict):
+            status = str(result.get("status") or "").lower()
+            if "cancel" in status or "cancel" in str(result.get("error") or "").lower():
+                return "cancelled"
+        status = getattr(getattr(task, "status", None), "value", getattr(task, "status", ""))
+        return "cancelled" if "cancel" in str(status).lower() else "completed"
+
+    def _run_core_task(
+        self,
+        message,
+        epoch: int,
+        attachments=None,
+        request_id: str = "",
+        session_id: str = "",
+        cancel_event=None,
+        channel=None,
+    ) -> None:
         """Execute a supported deterministic task without any GisAI engine.
 
         The dispatcher owns parsing, execution, independent read-back
@@ -2025,9 +2825,12 @@ class MainWindow:
         """
         from giscode.agentic.core_tasks import CoreTask, execute_request
 
+        from giscode.inference.router import purpose_for_surface
+
+        purpose = purpose_for_surface(has_image=self._has_image_attachment(attachments))
         root_path = str(getattr(self._active_project_context, "root_path", "") or "")
         task = CoreTask(
-            task_id=f"core-{time.time_ns()}",
+            task_id=request_id or f"core-{time.time_ns()}",
             raw_request=str(message),
             project_path=root_path,
             status="running",
@@ -2037,21 +2840,49 @@ class MainWindow:
                 message,
                 root_path,
                 task_id=task.task_id,
-                should_cancel=lambda: epoch != self._task_epoch or not self._active_task,
+                should_cancel=lambda: (
+                    (channel is not None and channel.closed)
+                    or epoch != self._task_epoch
+                    or self._task_request_id != request_id
+                    or not self._active_task
+                ),
                 deadline_s=self._remaining_task_budget(),
                 # Core edits ask the same person through the same
                 # thread-safe queue the engine-backed path uses.
                 approve=self._approve_edit,
-                model_router=self._selected_model_router(
-                    "vision" if self._has_image_attachment(attachments) else "chat"
+                # The workspace is a coding surface, so the router must resolve
+                # the *coding* profile. Asking for "chat" here ignored a
+                # configured coding provider and fell back to the built-in
+                # llama.cpp runtime, which then had no model loaded.
+                model_router=self._selected_model_router(purpose),
+                model_purpose=purpose,
+                coding_agent=self._coding_agent,
+                agent_task_id=(
+                    "gisai-task" if self._task_manager is not None else None
                 ),
                 attachments=attachments,
+                on_delta=lambda piece: self._stream_push(piece, channel=channel),
+                cancel_event=cancel_event,
             )
         except Exception as exc:  # never let a dispatcher bug look like success
-            self._worker_results[epoch] = (None, exc, epoch, task)
+            self._worker_results[epoch] = _TaskEvent(
+                "cancelled" if isinstance(exc, RequestCancelledError) else "error",
+                request_id,
+                session_id,
+                epoch,
+                error=exc,
+                task=task,
+            )
             return
         task.status = str(result.get("status") or "failed")
-        self._worker_results[epoch] = (result, None, epoch, task)
+        self._worker_results[epoch] = _TaskEvent(
+            self._task_result_kind(result, None, task),
+            request_id,
+            session_id,
+            epoch,
+            result=result,
+            task=task,
+        )
 
     def _selected_model_router(self, purpose: str = "coding"):
         """The router over the profile selected in Model Manager.
@@ -2125,18 +2956,50 @@ class MainWindow:
             self._apply_task_status(status)
         result = self._worker_results.pop(epoch, None)
         if result is not None:
-            task_result, error, result_epoch, task = result
+            if isinstance(result, _TaskEvent):
+                request_id = result.request_id
+                session_id = result.session_id
+                result_epoch = result.epoch
+                task_result, error, task = result.result, result.error, result.task
+                event_kind = result.kind
+            else:
+                # Backward-compatible shape used by older callers/tests.
+                task_result, error, result_epoch, task = result
+                request_id = self._task_request_id
+                session_id = self._task_session_id or self._session_id_for(
+                    self._task_chat_session
+                )
+                event_kind = self._task_result_kind(task_result, error, task)
+            if result_epoch != self._task_epoch:
+                return
+            if self._active_task and (
+                request_id != self._task_request_id
+                or session_id != self._task_session_id
+            ):
+                return
+            if not self._session_open_by_id(session_id):
+                return
             if task is not None and self._active_gisai_task is None:
                 self._accept_received_task(task, result_epoch)
-            if self._waiting_input(task):
+            if event_kind == "waiting_input" or self._waiting_input(task):
                 self._set_ui_state("IDLE")
                 # The task is parked, not working: a stale "Running tests..."
                 # must not stay on screen while it waits for the user.
                 self.vision_status_var.set(ACTIVITY_READY)
                 self._append_response(self._waiting_input_message(task))
                 self._active_task = False
+                channel = self._active_stream
+                if channel is not None:
+                    channel.close()
                 return
-            self._finish_task(task_result, error, result_epoch)
+            self._finish_task(
+                task_result,
+                error,
+                result_epoch,
+                request_id=request_id,
+                session_id=session_id,
+                event_kind=event_kind,
+            )
             return
         if self._active_task and epoch == self._task_epoch:
             self.root.after(25, lambda: self._drain_worker_result(epoch))
@@ -2194,8 +3057,21 @@ class MainWindow:
         except tk.TclError:
             return
 
-    def _finish_task(self, result, error, epoch: int) -> None:
+    def _finish_task(
+        self,
+        result,
+        error,
+        epoch: int,
+        *,
+        request_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        event_kind: Optional[str] = None,
+    ) -> None:
         if epoch != self._task_epoch:
+            return
+        if request_id and request_id != self._task_request_id:
+            return
+        if session_id and not self._session_open_by_id(session_id):
             return
         active_task = getattr(self, "_active_gisai_task", None)
         task_status = getattr(active_task, "status", None)
@@ -2219,7 +3095,8 @@ class MainWindow:
             )
         self._refresh_history()
         cancelled = (
-            isinstance(error, RequestCancelledError)
+            event_kind == "cancelled"
+            or isinstance(error, RequestCancelledError)
             or (error is not None and "cancel" in str(error).lower())
             or (isinstance(result, dict) and "cancel" in str(result.get("error", "")).lower())
             or task_status == "cancelled"
@@ -2259,12 +3136,18 @@ class MainWindow:
             )
         else:
             self._set_ui_state("IDLE")
+            # Completion gets its own resolved state; "Ready" is only the
+            # resting idle state, never a substitute for verified completion.
+            self._set_attention("Completed")
             # Any successful task is finished, including a coding task whose
             # last progress message was "Running tests...".
             self.vision_status_var.set(ACTIVITY_COMPLETED)
             report = self._result_text(result)
             report = self._with_change_summary(report, change_summary)
             self._show_chat_result(report, None, time.time() - self._task_start_time, epoch)
+        channel = self._active_stream
+        if channel is not None:
+            channel.close()
 
     @staticmethod
     def _failure_text(result, error) -> str:
@@ -2406,7 +3289,33 @@ class MainWindow:
         if str(text).lower() == "operation cancelled by user":
             text = "Operation cancelled."
         self._last_report = str(text)
-        self._append_history("assistant", str(text))
+        entry = self._stream_entry
+        target = self._task_chat_session or self._current_chat_session()
+        if not self._session_is_open(target):
+            # A closed conversation must never receive a late completion.
+            self._stream_entry = None
+            return
+        if entry is not None:
+            # The streamed text is already on screen: replace it with the final
+            # report rather than printing the same answer twice, and persist it
+            # once here instead of once per streamed piece.
+            entry["content"] = str(text)
+            target["text"] = "\n".join(
+                item.get("content", "")
+                for item in target.get("history", [])
+                if item.get("role") == "assistant"
+            )
+            chat_id = target.get("chat_id")
+            if chat_id:
+                try:
+                    self._chat_store.append_message(chat_id, "assistant", str(text))
+                except Exception as exc:  # persistence must not hide the answer
+                    self.logger.warning(f"Failed to append message to ChatStore: {exc}")
+            self._stream_entry = None
+            if target is self._current_chat_session():
+                self._render_current_chat()
+        else:
+            self._append_history("assistant", str(text), session=target)
         self.copy_report_btn.state(["!disabled"])
         self.phase_var.set(
             "Cancelled" if error is not None and "cancel" in str(error).lower()
@@ -2446,18 +3355,23 @@ class MainWindow:
         if state == "WORKING":
             self.revoke_btn.state(["!disabled"])
             self.phase_var.set("Working")
+            self._set_attention("Working")
         elif state == "STOPPING":
             self.revoke_btn.state(["disabled"])
             self.phase_var.set("Stopping")
+            self._set_attention("Stopping")
         elif state == "STOPPED":
             self.revoke_btn.state(["disabled"])
             self.phase_var.set("Cancelled")
+            self._set_attention("Cancelled")
         elif state == "ERROR":
             self.revoke_btn.state(["disabled"])
             self.phase_var.set("Error")
+            self._set_attention("Failed")
         elif state == "IDLE":
             self.revoke_btn.state(["disabled"])
             self.phase_var.set("Idle")
+            self._set_attention("Ready")
 
     def _stopped_task_handles(self):
         """The task that is about to stop, plus its project root and snapshot.
@@ -2584,6 +3498,9 @@ class MainWindow:
         if not self._active_task:
             return
         self._set_ui_state("STOPPING")
+        # Abort the provider stream itself, not just the display: the backend
+        # closes the connection and reports the partial answer as partial.
+        self._send_cancel.set()
         report = self._task_stop_report(kind="stop")
         self._task_epoch += 1
         epoch = self._task_epoch
@@ -2595,8 +3512,88 @@ class MainWindow:
                 self._task_manager.cancel()
             self._active_task = False
             self._active_gisai_task = None
-            self._show_chat_result(report, None, time.time() - self._task_start_time, epoch)
+            self._finish_stopped_stream(report, epoch)
             self._set_ui_state("STOPPED")
+
+    def _finish_stopped_stream(
+        self,
+        report: str,
+        epoch: int,
+        *,
+        marker: str = "[Stopped — partial answer; not completed.]",
+        phase: str = "Cancelled",
+        status: str = "Stopped; partial answer kept.",
+    ) -> None:
+        """Keep the text already shown; append a clear interrupted marker.
+
+        The worker may still be unwinding, and a late callback is ignored by
+        the epoch check. Stop or timeout is therefore final for this request
+        without replacing its partial answer with a generic report.
+        """
+        channel = self._active_stream
+        target = self._task_chat_session or self._current_chat_session()
+        if channel is None or target is None or not self._session_is_open(target):
+            if channel is not None:
+                channel.close()
+            self._stream_entry = None
+            return
+        pending_events = self._take_stream_events(channel)
+        entry = self._stream_entry
+        for event in pending_events:
+            if (
+                event.request_id != channel.request_id
+                or event.session_id != self._task_session_id
+                or not event.text
+            ):
+                continue
+            if entry is None:
+                entry = {"role": "assistant", "content": event.text}
+                target.setdefault("history", []).append(entry)
+                self._stream_entry = entry
+            else:
+                entry["content"] = str(entry.get("content", "")) + event.text
+
+        content = str(entry.get("content", "")) if entry is not None else ""
+        if content:
+            content = content.rstrip()
+            if report:
+                content += "\n\n" + str(report).strip()
+            content += "\n\n" + marker
+            entry["content"] = content
+            target["text"] = "\n".join(
+                item["content"]
+                for item in target.get("history", [])
+                if item.get("role") == "assistant"
+            )
+            chat_id = target.get("chat_id")
+            if chat_id:
+                try:
+                    self._chat_store.append_message(chat_id, "assistant", content)
+                except Exception as exc:  # persistence must not hide the answer
+                    self.logger.warning(
+                        f"Failed to append stopped message to ChatStore: {exc}"
+                    )
+            self._last_report = content
+            self._stream_entry = None
+            if target is self._current_chat_session():
+                self._render_current_chat()
+            self.copy_report_btn.state(["!disabled"])
+            self.phase_var.set(phase)
+            self._status_var.set(status)
+            self._terminal_state_until = time.time() + 1.0
+            channel.close()
+            return
+
+        self._stream_entry = None
+        channel.close()
+        self._show_chat_result(
+            report,
+            RequestCancelledError("stopped by the user"),
+            time.time() - self._task_start_time,
+            epoch,
+        )
+        self.phase_var.set(phase)
+        self._status_var.set(status)
 
     def _cancel_before_switch(self) -> None:
         if self._active_task:
@@ -2801,6 +3798,15 @@ class MainWindow:
             item = self._pending_approvals.pop(0)
             item["result"] = False
             item["done"].set()
+        # A request alive at shutdown is cancelled while Tk can still persist
+        # its partial answer. Its channel is then closed for any late worker.
+        try:
+            if self._active_task:
+                self._revoke_task()
+            if self._active_stream is not None:
+                self._active_stream.close()
+        except Exception:
+            pass
         # Stop any llama-server this window's inference owns so it cannot
         # outlive the GUI process.
         try:
@@ -2808,6 +3814,14 @@ class MainWindow:
             inf = getattr(mm, "_inference", None) if mm is not None else None
             if inf is not None and hasattr(inf, "unload_model"):
                 inf.unload_model()
+        except Exception:
+            pass
+        try:
+            browser_view = getattr(self, "_ai_web_chat_view", None) or getattr(
+                self, "_chatgpt_browser_view", None
+            )
+            if browser_view is not None:
+                browser_view.shutdown()
         except Exception:
             pass
         self.root.destroy()
@@ -2882,6 +3896,12 @@ class MainWindow:
         # "No project selected" after a project was chosen here (from the task
         # dialog or Open), because only the header combo box refreshed it.
         self._sync_project_workspace_display()
+
+    def _project_root_for_recovery(self) -> Optional[str]:
+        """The folder whose interrupted transactions the panel may show."""
+        context = getattr(self, "_active_project_context", None)
+        root = getattr(context, "root_path", None) if context is not None else None
+        return str(root) if root else None
 
     def _report_recovered_rollbacks(self) -> None:
         """Tell the user what an interrupted rollback left, and where it is.
@@ -2994,9 +4014,18 @@ class MainWindow:
 
     # ===== TAB CREATORS =====
     def _create_projects_tab(self) -> None:
-        frame = ttk.Frame(self._notebook, padding=10)
+        frame = ttk.Frame(self._notebook, padding=14)
         self._notebook.add(frame, text="Projects")
         self._tab_frames["Projects"] = frame
+
+        intro = ttk.Frame(frame, style="Gis.TFrame")
+        intro.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(intro, text="Projects", style="Gis.Title.TLabel").pack(anchor=tk.W)
+        ttk.Label(
+            intro,
+            text="Open a workspace to plan, inspect and approve changes. Nothing leaves this machine.",
+            style="Gis.Muted.TLabel",
+        ).pack(anchor=tk.W, pady=(2, 0))
 
         # Activating and closing a project are project actions, so they live
         # with the project workspace instead of in the header. The handlers,
@@ -3004,11 +4033,17 @@ class MainWindow:
         self.project_actions_row = ttk.Frame(frame)
         self.project_actions_row.pack(fill=tk.X, pady=(0, 8))
         self.open_project_btn = ttk.Button(
-            self.project_actions_row, text="Open project", command=self._on_open_project
+            self.project_actions_row,
+            text="Open project",
+            command=self._on_open_project,
+            style="Gis.Accent.TButton",
         )
         self.open_project_btn.pack(side=tk.LEFT)
         self.close_project_btn = ttk.Button(
-            self.project_actions_row, text="Close project", command=self._on_close_project
+            self.project_actions_row,
+            text="Close project",
+            command=self._on_close_project,
+            style="Gis.Ghost.TButton",
         )
         self.close_project_btn.pack(side=tk.LEFT, padx=(6, 0))
 
@@ -3030,6 +4065,22 @@ class MainWindow:
             coding_agent=build_coding_agent,
         )
         self._project_workspace_controller = controller  # For test compatibility
+
+        # Transaction recovery is project-scoped: it lists the durable records
+        # for whichever project is selected in the header and calls the same
+        # native engine the CLI uses. It stays one line for projects with no
+        # unfinished work, so ordinary project use is unchanged. It is packed
+        # before the expanding workspace, otherwise that workspace's requested
+        # height consumes the page and pushes the panel out of view.
+        from giscode.gui.recovery_panel import RecoveryPanel
+
+        self._recovery_panel = RecoveryPanel(
+            frame,
+            project_root_provider=self._project_root_for_recovery,
+            on_message=self._append_response,
+        )
+        self._recovery_panel.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
+
         view_host = ttk.Frame(frame)
         view_host.pack(fill=tk.BOTH, expand=True)
         self._project_workspace_view = ProjectWorkspaceView(view_host, controller)
@@ -3042,29 +4093,87 @@ class MainWindow:
         frame = ttk.Frame(self._notebook, padding=10)
         self._notebook.add(frame, text="Chat")
         self._tab_frames["Chat"] = frame
+        # Bottom-anchored queue block, packed before the expanding conversation
+        # so it can never be squeezed out of the page at the minimum size.
+        self._build_task_queue_panel(frame)
+        self._queue_widgets["frame"].pack_forget()
+        self._queue_widgets["frame"].pack(side=tk.BOTTOM, fill=tk.X, pady=(0, 8))
 
-        chat_frame = ttk.LabelFrame(frame, text="GisCode Assistant", padding=8)
+        chat_frame = ttk.LabelFrame(
+            frame, text="ENGINEERING WORKSPACE", padding=12, style="Gis.TLabelframe"
+        )
         chat_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
+        conversation_head = ttk.Frame(chat_frame, style="Gis.Card.TFrame")
+        conversation_head.pack(fill=tk.X, pady=(0, 8))
+        head_text = ttk.Frame(conversation_head, style="Gis.Card.TFrame")
+        head_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(
+            head_text,
+            text="Work with GisCode",
+            style="Gis.CardTitle.TLabel",
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            head_text,
+            text="Ask, plan or change the project. GisCode separates its answer, tool activity and evidence.",
+            style="Gis.CardMuted.TLabel",
+        ).pack(anchor=tk.W, pady=(2, 0))
+        legend = ttk.Frame(conversation_head, style="Gis.Card.TFrame")
+        legend.pack(side=tk.RIGHT)
+        for text, colour in (
+            ("YOU", self._palette.accent),
+            ("GISCODE", self._palette.teal),
+            ("DECISION", self._palette.warning),
+        ):
+            ttk.Label(
+                legend,
+                text=text,
+                style="Gis.Card.TLabel",
+                foreground=colour,
+                font=(self._fonts.ui, 8, "bold"),
+            ).pack(side=tk.LEFT, padx=(8, 0))
+
         self.response_text = tk.Text(chat_frame, height=15, wrap=tk.WORD)
+        style_text(self.response_text, self._palette, self._fonts)
         self.response_text.pack(fill=tk.BOTH, expand=True)
         # Add right-click context menu for response_text
         self._add_text_context_menu(self.response_text)
 
-        input_frame = ttk.Frame(chat_frame)
-        input_frame.pack(fill=tk.X, pady=(8, 0))
+        request_label = ttk.Label(
+            chat_frame,
+            text="YOUR REQUEST   ·   Enter sends  ·  Shift+Enter adds a line",
+            style="Gis.CardMuted.TLabel",
+        )
+        request_label.pack(anchor=tk.W, pady=(10, 4))
+        input_frame = ttk.Frame(chat_frame, style="Gis.Card.TFrame")
+        input_frame.pack(fill=tk.X)
 
         self.task_entry = _MultilineEntry(input_frame, height=4, wrap=tk.WORD)
-        self.task_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+        style_input(self.task_entry, self._palette, self._fonts)
+        self.task_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
         self.task_entry.bind("<Return>", self._send_task)
         self.task_entry.bind("<Control-Return>", self._send_task)
         self.task_entry.bind("<KeyRelease>", self._sync_draft)
         # Add right-click context menu for task_entry
         self._add_text_context_menu(self.task_entry)
 
-        self.send_task_btn = ttk.Button(input_frame, text="Send", command=self._send_task)
-        self.send_task_btn.pack(side=tk.RIGHT)
-        self.revoke_btn = ttk.Button(input_frame, text="Stop", command=self._revoke_task, state=tk.DISABLED)
+        # Compact paired actions. At the supported 1100 px floor the rail
+        # leaves less horizontal room; full-width labels were clipped, so these
+        # two retain their full text in a denser, still-accessible style.
+        self.send_task_btn = ttk.Button(
+            input_frame,
+            text="Send",
+            command=self._send_task,
+            style="Gis.CompactAccent.TButton",
+        )
+        self.send_task_btn.pack(side=tk.RIGHT, padx=(4, 0))
+        self.revoke_btn = ttk.Button(
+            input_frame,
+            text="Stop",
+            command=self._revoke_task,
+            state=tk.DISABLED,
+            style="Gis.CompactDanger.TButton",
+        )
         self.revoke_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
         attach_row = ttk.Frame(frame)
@@ -3101,6 +4210,18 @@ class MainWindow:
             self._chat_history_host = None
             self._chat_history_visible = False
 
+        # Pack-order contract: the fixed-height request block claims its space
+        # before the expanding conversation. In the original order the Text
+        # took its full requested height first, so at the supported 1100x700
+        # floor the request row was squeezed to 1 px and Send/Stop were hidden.
+        # Packing the request block first makes the conversation (the only
+        # widget that gains from extra space) absorb the shortfall instead.
+        for widget in (input_frame, request_label, self.response_text):
+            widget.pack_forget()
+        input_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        request_label.pack(side=tk.BOTTOM, anchor=tk.W, pady=(10, 4))
+        self.response_text.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
     def _toggle_chat_history(self) -> None:
         """Show or hide the conversation-history panel inside Chat."""
         host = getattr(self, "_chat_history_host", None)
@@ -3113,6 +4234,60 @@ class MainWindow:
             host.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
             self._chat_history_visible = True
             self._refresh_conversation_history()
+
+    def _create_ai_web_chat_tab(self) -> None:
+        from giscode.gui.ai_web_chat import AIWebChatView, SettingsBridge
+
+        frame = ttk.Frame(self._notebook)
+        self._notebook.add(frame, text="AI Web Chat")
+        self._tab_frames["AI Web Chat"] = frame
+        self._ai_web_chat_view = AIWebChatView(
+            frame,
+            project_root_provider=self._ai_web_chat_project_root,
+            on_guidance=self._use_ai_web_chat_guidance,
+            # The provider choice lives in its own settings key, never in the
+            # ChatGPT plan section and never in the OpenAI API-key settings.
+            settings=SettingsBridge(self._settings_get, self._settings_set),
+        )
+        # Compatibility alias for callers that still name the ChatGPT view.
+        self._chatgpt_browser_view = self._ai_web_chat_view
+        self._ai_web_chat_view.pack(fill=tk.BOTH, expand=True)
+
+    # ChatGPT is the default provider, not a separate surface; the old builder
+    # name stays as a thin alias so existing callers keep working.
+    _create_chatgpt_tab = _create_ai_web_chat_tab
+
+    def _ai_web_chat_project_root(self) -> Optional[str]:
+        """The current project root without exposing an unrelated folder."""
+        context = getattr(self, "_active_project_context", None)
+        root = getattr(context, "root_path", None) if context is not None else None
+        if root and os.path.isdir(root):
+            return root
+        external = getattr(self, "_external_project_root", None)
+        if external and os.path.isdir(external):
+            return external
+        return None
+
+    def _use_ai_web_chat_guidance(self, block: str) -> None:
+        """Insert advisory text into Chat; never send it automatically."""
+        entry = getattr(self, "task_entry", None)
+        if entry is None:
+            return
+        text = str(block or "").strip()
+        if not text:
+            return
+        current = entry.get("1.0", "end-1c")
+        prefix = "\n\n" if current.strip() else ""
+        entry.insert(tk.END, prefix + text)
+        entry.focus_set()
+        self._status_var.set(
+            "AI Web Chat guidance inserted into Chat as unverified; review before sending."
+        )
+
+    # Old name kept for external callers and existing tests.
+    _use_chatgpt_guidance = _use_ai_web_chat_guidance
+
+    _chatgpt_project_root = _ai_web_chat_project_root
 
     def _create_terminal_tab(self) -> None:
         # Pro-only: the builder lives in giscode.gui.pro_tabs, which the
@@ -3173,7 +4348,40 @@ class MainWindow:
         self._notebook.add(frame, text="Settings")
         self._tab_frames["Settings"] = frame
 
-        ttk.Label(frame, text="Settings", font=("Segoe UI", 12, "bold")).pack(pady=10)
+        ttk.Label(frame, text="Settings", style="Gis.Title.TLabel").pack(anchor=tk.W, pady=(2, 10))
+
+        # Appearance and attention are user preferences, not product whims.
+        # Both apply immediately and persist; neither needs a restart.
+        appearance_section = ttk.LabelFrame(frame, text="APPEARANCE & ATTENTION", padding=10, style="Gis.TLabelframe")
+        appearance_section.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(
+            appearance_section,
+            text="Ink is the focused dark workspace; Paper is the daylight reading surface.",
+            style="Gis.CardMuted.TLabel",
+        ).pack(anchor=tk.W, pady=(0, 6))
+        self._appearance_var = tk.StringVar(
+            value="Paper (light)" if getattr(self, "_ui_appearance", "dark") == "light" else "Ink (dark)"
+        )
+        appearance_combo = ttk.Combobox(
+            appearance_section,
+            textvariable=self._appearance_var,
+            values=["Ink (dark)", "Paper (light)"],
+            state="readonly",
+            width=20,
+            style="Gis.TCombobox",
+        )
+        appearance_combo.pack(anchor=tk.W)
+        appearance_combo.bind("<<ComboboxSelected>>", self._on_appearance_choice)
+        self._attention_pref_var = tk.BooleanVar(
+            value=bool(self._settings_get("ui.attention", True))
+        )
+        ttk.Checkbutton(
+            appearance_section,
+            text="Show the top-bar task attention signal (no flashing)",
+            variable=self._attention_pref_var,
+            command=self._save_attention_preference,
+            style="Gis.TCheckbutton",
+        ).pack(anchor=tk.W, pady=(8, 0))
 
         # Model settings: the essentials every Core user needs, pointing at the
         # Model Manager rather than duplicating it.
@@ -3189,6 +4397,17 @@ class MainWindow:
             foreground="gray",
         ).pack(anchor=tk.W, pady=(4, 0))
 
+        # ChatGPT plan usage is a separate product from the OpenAI API key
+        # below: OAuth plan-funded inference, never API billing. Both stay off
+        # until the user acts. No request is made by rendering this tab.
+        self._build_chatgpt_settings_section(frame)
+
+        # OpenAI is an optional, billable remote provider. It is available in
+        # Core, but stays disabled until the user explicitly enables billable
+        # calls after reading the disclosure. The key is never placed in this
+        # settings file; it goes to the environment or the DPAPI-backed store.
+        self._build_openai_settings_section(frame)
+
         # Hosted writer and self-improvement settings are advanced (Pro) only.
         # Core says so plainly and stops here instead of exposing controls it
         # cannot support.
@@ -3199,8 +4418,8 @@ class MainWindow:
                 advanced,
                 text=(
                     "Hosted-writer and self-improvement settings are part of "
-                    "GisCode Pro. GisCode Core runs entirely on your own machine "
-                    "with the model you choose in Model Manager."
+                    "GisCode Pro. Core remains local by default; the OpenAI API "
+                    "above is an optional billable remote integration."
                 ),
                 foreground="gray",
                 wraplength=760,
@@ -3324,6 +4543,723 @@ class MainWindow:
                 "[Settings] Could not save hosted writer settings: settings "
                 "source unavailable."
             )
+
+    # ----------------------------------------------------------- ChatGPT plan
+    def _chatgpt_store(self):
+        from giscode.providers.chatgpt_auth import ChatGPTAccountStore
+
+        return ChatGPTAccountStore()
+
+    def _build_chatgpt_settings_section(self, frame) -> None:
+        """Visible Sign in with ChatGPT surface, separate from API billing.
+
+        Rendering this section makes no network request and reads no token. The
+        browser is the system browser, and the API key section below stays a
+        completely separate authentication and billing path.
+        """
+        section = ttk.LabelFrame(
+            frame, text="ChatGPT plan (Sign in with ChatGPT)", padding=10
+        )
+        section.pack(fill=tk.X, pady=10)
+        cfg = self._settings_get("providers.chatgpt", {}) or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+        self._chatgpt_accounts = []
+        self._chatgpt_choices = []
+        self._chatgpt_signin_inflight = False
+        self._chatgpt_account_var = tk.StringVar(value="No ChatGPT account connected")
+        self._chatgpt_workspace_var = tk.StringVar(value="")
+        self._chatgpt_status_var = tk.StringVar(value="")
+        self._chatgpt_plan_var = tk.StringVar(value="")
+        self._chatgpt_billing_var = tk.StringVar(value="")
+        self._chatgpt_bound_var = tk.StringVar(value="")
+        self._chatgpt_usage_var = tk.StringVar(value="")
+        self._chatgpt_active_var = tk.BooleanVar(value=bool(cfg.get("enabled", False)))
+        self._chatgpt_model_var = tk.StringVar(value=str(cfg.get("model") or ""))
+
+        ttk.Label(
+            section,
+            text=(
+                "Use your ChatGPT plan for eligible AI requests in GisCode. "
+                "This is not an OpenAI API key and does not create API usage "
+                "charges. A ChatGPT subscription is required; Free accounts "
+                "without plan-funded access will be told so by OpenAI."
+            ),
+            foreground="gray",
+            wraplength=760,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+
+        account_row = ttk.Frame(section)
+        account_row.pack(fill=tk.X, pady=(8, 0))
+        ttk.Label(account_row, text="Account:").pack(side=tk.LEFT)
+        self._chatgpt_account_combo = ttk.Combobox(
+            account_row,
+            textvariable=self._chatgpt_account_var,
+            state="readonly",
+            width=48,
+        )
+        self._chatgpt_account_combo.pack(side=tk.LEFT, padx=(8, 0))
+        self._chatgpt_account_combo.bind(
+            "<<ComboboxSelected>>", self._on_chatgpt_account_selected
+        )
+
+        ttk.Label(section, textvariable=self._chatgpt_workspace_var).pack(
+            anchor=tk.W, pady=(2, 0)
+        )
+        ttk.Label(section, textvariable=self._chatgpt_status_var).pack(
+            anchor=tk.W, pady=(6, 0)
+        )
+        ttk.Label(section, textvariable=self._chatgpt_plan_var).pack(anchor=tk.W)
+        ttk.Label(section, textvariable=self._chatgpt_billing_var).pack(anchor=tk.W)
+        ttk.Label(section, textvariable=self._chatgpt_bound_var).pack(anchor=tk.W)
+        ttk.Label(section, textvariable=self._chatgpt_usage_var, foreground="gray").pack(
+            anchor=tk.W
+        )
+
+        model_row = ttk.Frame(section)
+        model_row.pack(fill=tk.X, pady=(8, 0))
+        ttk.Checkbutton(
+            model_row,
+            text="Use ChatGPT plan for coding tasks (sets the active coding profile)",
+            variable=self._chatgpt_active_var,
+        ).pack(anchor=tk.W)
+        grid = ttk.Frame(section)
+        grid.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(grid, text="Model id:").grid(
+            row=0, column=0, sticky=tk.W, padx=(0, 8), pady=2
+        )
+        ttk.Entry(grid, textvariable=self._chatgpt_model_var, width=44).grid(
+            row=0, column=1, sticky=tk.W, pady=2
+        )
+
+        buttons = ttk.Frame(section)
+        buttons.pack(fill=tk.X, pady=(8, 0))
+        self._chatgpt_signin_button = ttk.Button(
+            buttons,
+            text="Continue with ChatGPT",
+            command=lambda: self._continue_with_chatgpt(),
+        )
+        self._chatgpt_signin_button.pack(side=tk.LEFT)
+        ttk.Button(
+            buttons, text="Reauthorize", command=self._reauth_chatgpt
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(
+            buttons, text="Save ChatGPT settings", command=self._save_chatgpt_settings
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(
+            buttons, text="Disconnect", command=self._disconnect_chatgpt
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(
+            buttons, text="Manage usage", command=self._open_chatgpt_usage
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(
+            buttons, text="Refresh status", command=self._refresh_chatgpt_status
+        ).pack(side=tk.LEFT, padx=(6, 0))
+
+        self._refresh_chatgpt_status()
+
+    def _refresh_chatgpt_status(self) -> None:
+        account_var = getattr(self, "_chatgpt_account_var", None)
+        status_var = getattr(self, "_chatgpt_status_var", None)
+        if account_var is None or status_var is None:
+            return
+        try:
+            store = self._chatgpt_store()
+            accounts = store.accounts()
+            active_id = store.active_account_id()
+        except Exception as exc:  # noqa: BLE001 - the panel reports, never crashes
+            status_var.set(f"ChatGPT status unavailable: {exc}")
+            return
+        self._chatgpt_accounts = accounts
+        self._chatgpt_choices = self._chatgpt_choices_for(accounts)
+        labels = [label for label, _account in self._chatgpt_choices]
+        combo = getattr(self, "_chatgpt_account_combo", None)
+        if combo is not None:
+            combo["values"] = labels or ["No ChatGPT account connected"]
+        active = next(
+            (account for account in accounts if account.account_id == active_id),
+            accounts[0] if accounts else None,
+        )
+        if active is None:
+            account_var.set("No ChatGPT account connected")
+            self._chatgpt_workspace_var.set("")
+            status_var.set("Not signed in. Continue with ChatGPT to connect.")
+            self._chatgpt_plan_var.set("ChatGPT plan inference permission: not connected")
+        else:
+            active_label = next(
+                (
+                    label
+                    for label, account in self._chatgpt_choices
+                    if account.account_id == active.account_id
+                ),
+                active.label,
+            )
+            account_var.set(active_label)
+            self._chatgpt_workspace_var.set(
+                f"Workspace: {active.workspace}"
+                if active.workspace
+                else "Workspace: not reported by OpenAI for this account"
+            )
+            if active.needs_reauth:
+                status_var.set(
+                    "Sign in again"
+                    + (f" ({active.last_error})" if active.last_error else "")
+                    + "."
+                )
+            else:
+                status_var.set("Signed in. ChatGPT plan session is active.")
+            if active.plan_usage_enabled:
+                self._chatgpt_plan_var.set(
+                    "ChatGPT plan inference permission: granted (chatgpt.tokens.use.direct)."
+                )
+            else:
+                self._chatgpt_plan_var.set(
+                    "ChatGPT plan inference permission: not granted. Reauthorize "
+                    "and allow plan usage, or use the separate OpenAI API key."
+                )
+        self._chatgpt_billing_var.set(self._chatgpt_billing_line())
+        self._chatgpt_bound_var.set(self._chatgpt_bound_text())
+        self._chatgpt_usage_var.set(
+            "Usage and limits are managed in ChatGPT Settings, Usage. GisCode "
+            "does not estimate plan usage in money."
+        )
+
+    @staticmethod
+    def _chatgpt_choices_for(accounts) -> list[tuple[str, object]]:
+        """Display labels that stay unique when two accounts share an email."""
+        counts: dict[str, int] = {}
+        for account in accounts:
+            counts[account.label] = counts.get(account.label, 0) + 1
+        choices: list[tuple[str, object]] = []
+        for account in accounts:
+            label = account.label
+            if counts[label] > 1:
+                label = f"{label} · {account.account_id[:8]}"
+            choices.append((label, account))
+        return choices
+
+    def _chatgpt_bound_text(self) -> str:
+        """Name the account actually bound to the active coding provider."""
+        source = self._settings_source()
+        if source is None:
+            return "Coding requests: ChatGPT binding unavailable (settings are not writable)."
+        try:
+            from giscode.providers.profiles import ProfileStore
+
+            profile = ProfileStore(source).active_for("coding")
+        except Exception:  # noqa: BLE001 - the panel reports, never crashes
+            profile = None
+        if profile is None or profile.provider != "chatgpt":
+            return "Coding requests: ChatGPT plan is not the active coding provider."
+        try:
+            cfg = self._settings_get("providers.chatgpt", {}) or {}
+            account_id = (
+                str(cfg.get("account_id") or "") if isinstance(cfg, dict) else ""
+            )
+            store = self._chatgpt_store()
+            bound = (
+                store.get_account(account_id) if account_id else store.active_account()
+            )
+            active = store.active_account()
+        except Exception:  # noqa: BLE001
+            return "Coding requests: the bound ChatGPT account could not be read."
+        if bound is None:
+            return "Coding requests: no stored account is bound; sign in again."
+        if active is not None and active.account_id != bound.account_id:
+            return (
+                f"Coding requests use: {bound.label}. The picker shows "
+                f"{active.label}; select it to bind that account."
+            )
+        return f"Coding requests use: {bound.label}."
+
+    def _chatgpt_billing_line(self) -> str:
+        from giscode.providers.profiles import ProfileStore
+
+        source = self._settings_source()
+        profile = None
+        if source is not None:
+            try:
+                profile = ProfileStore(source).active_for("coding")
+            except Exception:  # noqa: BLE001
+                profile = None
+        if profile is not None and profile.provider == "chatgpt":
+            return (
+                "Billing for coding tasks: ChatGPT plan (plan or credits; no "
+                "OpenAI API charge)."
+            )
+        if profile is not None and profile.provider == "openai":
+            return (
+                "Billing for coding tasks: OpenAI API usage on your API account "
+                "(separate from ChatGPT plan)."
+            )
+        if profile is not None:
+            return "Billing for coding tasks: local model (no remote charge)."
+        return "Billing for coding tasks: not selected."
+
+    def _on_chatgpt_account_selected(self, _event=None) -> None:
+        label = str(self._chatgpt_account_var.get() or "")
+        account = next(
+            (
+                item
+                for display, item in getattr(self, "_chatgpt_choices", [])
+                if display == label
+            ),
+            None,
+        )
+        if account is None:
+            return
+        source = self._settings_source()
+        if source is None:
+            messagebox.showerror(
+                "ChatGPT account", "Settings are not writable in this session."
+            )
+            self._refresh_chatgpt_status()
+            return
+        try:
+            from giscode.providers.chatgpt_plan import select_chatgpt_account
+
+            select_chatgpt_account(
+                source, account.account_id, store=self._chatgpt_store()
+            )
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("ChatGPT account", f"The account was not selected: {exc}")
+            self._refresh_chatgpt_status()
+            return
+        # Cached routers may hold a backend bound to the previous account.
+        self._model_router_cache = None
+        self._refresh_chatgpt_status()
+        self._status_var.set(f"ChatGPT account bound for coding: {account.label}")
+
+    def _continue_with_chatgpt(self, account_id: str = "") -> None:
+        if getattr(self, "_chatgpt_signin_inflight", False):
+            return
+        import threading
+
+        self._chatgpt_signin_inflight = True
+        button = getattr(self, "_chatgpt_signin_button", None)
+        if button is not None:
+            button.state(["disabled"])
+        self._chatgpt_status_var.set(
+            "Waiting for the browser. Complete the ChatGPT sign-in there."
+        )
+
+        def worker():
+            try:
+                account = self._chatgpt_store().sign_in(account_id=account_id or "")
+            except Exception as exc:  # noqa: BLE001 - reported in the UI
+                self.after(0, lambda: self._chatgpt_signin_done(None, exc))
+            else:
+                self.after(0, lambda: self._chatgpt_signin_done(account, None))
+
+        try:
+            threading.Thread(
+                target=worker, name="giscode-chatgpt-signin", daemon=True
+            ).start()
+        except Exception as exc:  # noqa: BLE001
+            self._chatgpt_signin_inflight = False
+            if button is not None:
+                button.state(["!disabled"])
+            messagebox.showerror("Continue with ChatGPT", f"Sign-in was not started: {exc}")
+
+    def _chatgpt_signin_done(self, account, error) -> None:
+        self._chatgpt_signin_inflight = False
+        button = getattr(self, "_chatgpt_signin_button", None)
+        if button is not None:
+            button.state(["!disabled"])
+        self._refresh_chatgpt_status()
+        if error is not None:
+            action = str(getattr(error, "action", "") or "")
+            self._chatgpt_status_var.set(f"Sign-in did not complete: {error}")
+            messagebox.showerror(
+                "Continue with ChatGPT",
+                f"{error}" + (f"\n\n{action}" if action else ""),
+            )
+            return
+        self._status_var.set(f"ChatGPT connected: {account.label}")
+        if not account.plan_usage_enabled:
+            self._append_response(
+                "[Settings] ChatGPT signed in, but plan usage was not granted. "
+                "Reauthorize and allow it, or use the OpenAI API key option."
+            )
+        else:
+            self._append_response(
+                "[Settings] ChatGPT plan connected. Select a model and save the "
+                "coding profile to use it."
+            )
+
+    def _reauth_chatgpt(self) -> None:
+        account = self._active_chatgpt_account()
+        self._continue_with_chatgpt(account.account_id if account else "")
+
+    def _active_chatgpt_account(self):
+        try:
+            return self._chatgpt_store().active_account()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _disconnect_chatgpt(self) -> None:
+        account = self._active_chatgpt_account()
+        if account is None:
+            messagebox.showinfo("ChatGPT", "No ChatGPT account is connected.")
+            return
+        if not messagebox.askyesno(
+            "Disconnect ChatGPT",
+            "Revoke the renewable ChatGPT session and remove the stored tokens "
+            "from this computer? The saved account registration is kept for a "
+            "later sign-in.",
+        ):
+            return
+        try:
+            result = self._chatgpt_store().disconnect(account.account_id)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("ChatGPT", f"The session was not disconnected: {exc}")
+            return
+        self._refresh_chatgpt_status()
+        if result.get("remote_confirmed"):
+            self._status_var.set("ChatGPT session revoked and local tokens removed")
+        else:
+            self._status_var.set(
+                "ChatGPT local tokens removed; remote revocation was not confirmed"
+            )
+
+    def _open_chatgpt_usage(self) -> None:
+        import webbrowser
+
+        webbrowser.open("https://chatgpt.com/settings/usage")
+
+    def _save_chatgpt_settings(self) -> None:
+        account = self._active_chatgpt_account()
+        active = bool(getattr(self, "_chatgpt_active_var", None).get())
+        model = str(getattr(self, "_chatgpt_model_var", None).get() or "").strip()
+        if active and not model:
+            messagebox.showerror(
+                "ChatGPT settings", "Enter the exact model id from the account's list."
+            )
+            return
+        if active and (account is None or not account.plan_usage_enabled):
+            messagebox.showerror(
+                "ChatGPT settings",
+                "Sign in with ChatGPT and grant plan usage before selecting it for "
+                "coding tasks.",
+            )
+            return
+        source = self._settings_source()
+        if source is None:
+            messagebox.showerror(
+                "ChatGPT settings", "Settings are not writable in this session."
+            )
+            return
+        try:
+            from giscode.providers.chatgpt_plan import configure_chatgpt_profile
+            from giscode.providers.profiles import ProfileStore
+            from giscode.providers.registry import ProviderRegistry
+
+            registry = ProviderRegistry(source)
+            configs = registry.configs()
+            cfg = dict(configs.get("chatgpt") or {})
+            cfg.update(
+                {
+                    "kind": "chatgpt",
+                    "label": "ChatGPT plan",
+                    "enabled": active,
+                    "allow_remote": True,
+                    "account_id": account.account_id if account else "",
+                    "model": model,
+                }
+            )
+            configs["chatgpt"] = cfg
+            registry.save_configs(configs)
+            if active:
+                profile = configure_chatgpt_profile(
+                    source,
+                    model=model,
+                    account_id=account.account_id,
+                    active=True,
+                )
+                self._refresh_model_list()
+                self._status_var.set(f"ChatGPT plan profile saved: {profile.model}")
+            else:
+                profiles = ProfileStore(source)
+                current = profiles.active_for("coding")
+                if current is not None and current.provider == "chatgpt":
+                    local = next(
+                        (
+                            p
+                            for p in profiles.for_purpose("coding")
+                            if p.provider != "chatgpt"
+                        ),
+                        None,
+                    )
+                    if local is not None:
+                        profiles.set_active(local.id)
+                self._status_var.set("ChatGPT coding profile disabled")
+            self._model_router_cache = None
+            self._refresh_chatgpt_status()
+            self._append_response(
+                "[Settings] ChatGPT plan settings saved. No request was sent by saving."
+            )
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("ChatGPT settings", f"Settings were not saved: {exc}")
+
+    def _build_openai_settings_section(self, frame) -> None:
+        """Build the Core-wide official OpenAI API settings surface.
+
+        The section is deliberately explicit about billing. It never saves the
+        key in config.json and it does not make a network request while merely
+        rendering the settings tab.
+        """
+        from giscode.providers.openai import BILLING_DISCLOSURE, OFFICIAL_ENDPOINT
+        from giscode.providers.profiles import ProfileStore
+
+        cfg = self._settings_get("providers.openai", {}) or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+        source = self._settings_source()
+        active_profile = None
+        if source is not None:
+            try:
+                active_profile = ProfileStore(source).active_for("coding")
+            except Exception:
+                active_profile = None
+        openai_active = bool(
+            active_profile is not None and active_profile.provider == "openai"
+        )
+
+        section = ttk.LabelFrame(frame, text="OpenAI API (optional, billable)", padding=10)
+        section.pack(fill=tk.X, pady=10)
+        self._openai_active_var = tk.BooleanVar(value=openai_active)
+        self._openai_paid_var = tk.BooleanVar(
+            value=bool(cfg.get("paid_calls_allowed", False))
+        )
+        self._openai_model_var = tk.StringVar(
+            value=str(
+                (active_profile.model if openai_active and active_profile else "")
+                or cfg.get("model", "")
+            )
+        )
+        self._openai_key_var = tk.StringVar(value="")
+        self._openai_key_status_var = tk.StringVar(value="")
+        self._openai_usage_var = tk.StringVar(value="")
+
+        ttk.Checkbutton(
+            section,
+            text="Use OpenAI for coding tasks (sets the active coding profile)",
+            variable=self._openai_active_var,
+        ).pack(anchor=tk.W)
+        ttk.Checkbutton(
+            section,
+            text="Allow billable OpenAI API calls (required; nothing is sent while off)",
+            variable=self._openai_paid_var,
+        ).pack(anchor=tk.W, pady=(4, 0))
+
+        grid = ttk.Frame(section)
+        grid.pack(fill=tk.X, pady=(8, 0))
+        ttk.Label(grid, text="Model id:").grid(
+            row=0, column=0, sticky=tk.W, padx=(0, 8), pady=2
+        )
+        ttk.Entry(grid, textvariable=self._openai_model_var, width=44).grid(
+            row=0, column=1, sticky=tk.W, pady=2
+        )
+        ttk.Label(grid, text="API key:").grid(
+            row=1, column=0, sticky=tk.W, padx=(0, 8), pady=2
+        )
+        ttk.Entry(
+            grid, textvariable=self._openai_key_var, show="*", width=44
+        ).grid(row=1, column=1, sticky=tk.W, pady=2)
+
+        ttk.Label(
+            section,
+            text=BILLING_DISCLOSURE,
+            foreground="gray",
+            wraplength=760,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(8, 0))
+        ttk.Label(
+            section,
+            text=(
+                "The key is read from OPENAI_API_KEY or saved with Windows DPAPI "
+                "for the current Windows user; it is never written to config.json "
+                "or logs. Endpoint: "
+                + OFFICIAL_ENDPOINT
+            ),
+            foreground="gray",
+            wraplength=760,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(2, 0))
+        ttk.Label(
+            section, textvariable=self._openai_key_status_var, foreground="gray"
+        ).pack(anchor=tk.W, pady=(6, 0))
+        ttk.Label(
+            section, textvariable=self._openai_usage_var, foreground="gray"
+        ).pack(anchor=tk.W)
+
+        buttons = ttk.Frame(section)
+        buttons.pack(fill=tk.X, pady=(8, 0))
+        ttk.Button(
+            buttons, text="Save OpenAI settings", command=self._save_openai_settings
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            buttons, text="Save key securely", command=self._save_openai_key
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(
+            buttons, text="Remove saved key", command=self._remove_openai_key
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(
+            buttons, text="Refresh key status", command=self._refresh_openai_key_status
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        self._refresh_openai_key_status()
+
+    def _refresh_openai_key_status(self) -> None:
+        status_var = getattr(self, "_openai_key_status_var", None)
+        if status_var is None:
+            return
+        try:
+            from giscode.providers.credentials import (
+                default_credential_store,
+                masked_credential_status,
+            )
+
+            store = default_credential_store()
+            status_var.set(
+                f"API key: {masked_credential_status(store)} "
+                "(environment OPENAI_API_KEY or protected local store)"
+            )
+            usage_var = getattr(self, "_openai_usage_var", None)
+            if usage_var is not None:
+                source = self._settings_source()
+                if source is not None:
+                    from giscode.providers.registry import ProviderRegistry
+
+                    provider = ProviderRegistry(source).get("openai")
+                    describe = getattr(provider, "usage_description", None)
+                    if callable(describe):
+                        usage_var.set(f"Usage this process: {describe()}")
+        except Exception as exc:
+            status_var.set(f"API key status unavailable: {exc}")
+
+    def _save_openai_key(self) -> None:
+        key_var = getattr(self, "_openai_key_var", None)
+        if key_var is None:
+            return
+        value = str(key_var.get() or "").strip()
+        if not value:
+            messagebox.showerror("OpenAI API key", "Enter an API key first.")
+            return
+        try:
+            from giscode.providers.credentials import (
+                CredentialStoreError,
+                default_credential_store,
+            )
+
+            store = default_credential_store()
+            if getattr(store, "read_only", True):
+                messagebox.showinfo(
+                    "OpenAI API key",
+                    "This system has no protected credential store. Set "
+                    "OPENAI_API_KEY in the environment instead.",
+                )
+                return
+            store.set("openai", value)
+        except (CredentialStoreError, OSError) as exc:
+            messagebox.showerror("OpenAI API key", f"The key was not saved: {exc}")
+            return
+        except Exception as exc:
+            messagebox.showerror("OpenAI API key", f"The key was not saved: {exc}")
+            return
+        key_var.set("")
+        self._refresh_openai_key_status()
+        self._status_var.set("OpenAI API key saved securely")
+
+    def _remove_openai_key(self) -> None:
+        try:
+            from giscode.providers.credentials import default_credential_store
+
+            default_credential_store().delete("openai")
+            if getattr(self, "_openai_key_var", None) is not None:
+                self._openai_key_var.set("")
+            self._refresh_openai_key_status()
+            self._status_var.set("Saved OpenAI API key removed")
+        except Exception as exc:
+            messagebox.showerror("OpenAI API key", f"The key was not removed: {exc}")
+
+    def _save_openai_settings(self) -> None:
+        """Persist provider consent and the active coding profile.
+
+        Saving this form never calls OpenAI. ``paid_calls_allowed`` is merely
+        recorded, and the active profile is only created when the user selected
+        OpenAI explicitly.
+        """
+        active_var = getattr(self, "_openai_active_var", None)
+        paid_var = getattr(self, "_openai_paid_var", None)
+        model_var = getattr(self, "_openai_model_var", None)
+        if active_var is None or paid_var is None or model_var is None:
+            return
+        active = bool(active_var.get())
+        model = str(model_var.get() or "").strip()
+        if active and not model:
+            messagebox.showerror(
+                "OpenAI settings", "Enter the exact OpenAI model id (for example, gpt-4.1)."
+            )
+            return
+        source = self._settings_source()
+        if source is None:
+            messagebox.showerror(
+                "OpenAI settings", "Settings are not writable in this session."
+            )
+            return
+        try:
+            from giscode.providers.openai import OFFICIAL_ENDPOINT, configure_openai_profile
+            from giscode.providers.registry import ProviderRegistry
+
+            registry = ProviderRegistry(source)
+            configs = registry.configs()
+            cfg = dict(configs.get("openai") or {})
+            cfg.update(
+                {
+                    "kind": "openai",
+                    "label": "OpenAI",
+                    "endpoint": OFFICIAL_ENDPOINT,
+                    "enabled": active,
+                    "allow_remote": True,
+                    "api_key_env": "OPENAI_API_KEY",
+                    "paid_calls_allowed": bool(paid_var.get()),
+                    "model": model,
+                }
+            )
+            configs["openai"] = cfg
+            registry.save_configs(configs)
+            if active:
+                profile = configure_openai_profile(
+                    source,
+                    model=model,
+                    active=True,
+                    paid_calls_allowed=bool(paid_var.get()),
+                )
+                self._refresh_model_list()
+                self._status_var.set(
+                    f"OpenAI profile saved: {profile.model}; billable calls "
+                    f"{'enabled' if paid_var.get() else 'still disabled'}"
+                )
+            else:
+                from giscode.providers.profiles import ProfileStore
+
+                profiles = ProfileStore(source)
+                current = profiles.active_for("coding")
+                if current is not None and current.provider == "openai":
+                    local = next(
+                        (p for p in profiles.for_purpose("coding") if p.provider != "openai"),
+                        None,
+                    )
+                    if local is not None:
+                        profiles.set_active(local.id)
+                self._status_var.set("OpenAI coding profile disabled; local profile kept")
+            self._refresh_openai_key_status()
+            self._append_response(
+                "[Settings] OpenAI API settings saved. No request was sent by saving."
+            )
+        except Exception as exc:
+            messagebox.showerror("OpenAI settings", f"Settings were not saved: {exc}")
 
     def _create_model_manager_tab(self) -> None:
         frame = ttk.Frame(self._notebook, padding=10)
@@ -3835,7 +5771,19 @@ class MainWindow:
             pass
         self._active_task = False
         self._active_gisai_task = None
-        self._show_chat_result(report, None, time.time() - self._task_start_time, epoch)
+        if self._active_stream is not None and not self._active_stream.closed:
+            self._finish_stopped_stream(
+                report,
+                epoch,
+                marker="[Timed out — partial answer; task not completed.]",
+                phase="Timeout",
+                status="Timed out; partial answer kept.",
+            )
+        else:
+            self._show_chat_result(
+                report, None, time.time() - self._task_start_time, epoch
+            )
+        self._status_var.set("Timed out.")
         self._set_ui_state("STOPPED")
         self.phase_var.set("Timeout")
         if self._task_manager is not None:
@@ -3843,6 +5791,9 @@ class MainWindow:
                 self._task_manager.cancel()
             except Exception:
                 pass
+        # A timeout is not a user cancellation. The phase/report already say so;
+        # the shell's labelled attention state must not contradict them.
+        self._set_attention("Timed out")
 
     def _reset_task_ui(self, epoch: int) -> None:
         if epoch != self._task_epoch:
@@ -3918,8 +5869,7 @@ class MainWindow:
         if self._gisai_engine is None:
             self.gisai_phase_var.set("Unavailable")
             self.gisai_status_var.set("Unavailable")
-            if hasattr(self, "_gisai_header_label"):
-                self._gisai_header_label.config(text="GisAI — Unavailable")
+            self._set_gisai_indicator("Unavailable")
             self.root.after(1000, self._poll_gisai_state)
             return
         model_loaded = False
@@ -3934,23 +5884,18 @@ class MainWindow:
             state = getattr(task.state, "value", str(task.state))
             self.gisai_phase_var.set(state.capitalize())
             self.gisai_status_var.set(status.capitalize())
-            if hasattr(self, "_gisai_header_label"):
-                self._gisai_header_label.config(text=f"GisAI — {state.capitalize()}")
+            self._set_gisai_indicator(state.capitalize())
         else:
             # Use the live activity if fresh, otherwise show Ready
             live = self._live_activity_fresh()
             if live:
                 self.gisai_phase_var.set("Working")
                 self.gisai_status_var.set(live)
-                if hasattr(self, "_gisai_header_label"):
-                    self._gisai_header_label.config(text=f"GisAI — {live}")
+                self._set_gisai_indicator(live)
             else:
                 self.gisai_phase_var.set("Ready")
                 self.gisai_status_var.set("Ready" if model_loaded else "No model loaded")
-                if hasattr(self, "_gisai_header_label"):
-                    self._gisai_header_label.config(
-                        text="GisAI — Ready" if model_loaded else "GisAI — No model loaded"
-                    )
+                self._set_gisai_indicator("Ready" if model_loaded else "No model loaded")
         self.root.after(500, self._poll_gisai_state)
 
     def _poll_terminal_state(self) -> None:

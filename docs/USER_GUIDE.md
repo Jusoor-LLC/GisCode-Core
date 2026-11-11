@@ -251,6 +251,26 @@ Model files must be GGUF and in a folder GisCode scans; see
 
 ---
 
+### Streaming answers and Stop
+
+Ollama, LM Studio and OpenAI-compatible servers send an answer as it is
+generated, so Chat shows the text as it arrives. The built-in `llama.cpp`
+runtime streams the same way. A provider that cannot stream still answers in one
+piece; Chat never shows a fake partial answer.
+
+**Stop** closes the connection GisCode opened and keeps the text you already saw,
+clearly labelled as a partial answer. A stopped reply is never presented as a
+finished one.
+
+Starting a new chat while an answer is streaming stops that answer in its
+original conversation. Its partial text is kept there and is never copied into
+the new chat.
+
+One limit is worth knowing: Stop ends *this computer's* side of the request.
+Ollama, LM Studio and any remote server may keep computing until they notice the
+client has gone; GisCode cannot force another program to stop. Only what this
+computer was doing is guaranteed to stop.
+
 ## 6. Attach an image
 
 The attachment row under the conversation has **Attach Image** and **Analyze
@@ -308,8 +328,17 @@ The **Settings** tab is deliberately small in Core:
 
 - A **Model** section showing the current model status and an **Open Model
   Manager** button.
+- A **ChatGPT plan (Sign in with ChatGPT)** section. **Continue with ChatGPT**
+  opens your system browser; the app shows the connected account, workspace
+  when OpenAI reports it, whether plan usage was granted, which billing
+  applies, and a **Disconnect** action. See [`CHATGPT_PLAN.md`](CHATGPT_PLAN.md).
+- An **OpenAI API (optional, billable)** section. It is off by default. It shows
+  the key status without ever showing the key, carries the billing disclosure,
+  and refuses to send anything until you tick **Allow billable OpenAI API
+  calls**. See [`OPENAI_DIRECT.md`](OPENAI_DIRECT.md).
 - An **Advanced settings** section that states plainly that hosted-writer and
-  self-improvement settings are Pro features. Core runs entirely on your machine.
+  self-improvement settings are Pro features. Apart from the opt-in OpenAI
+  provider, Core runs entirely on your machine.
 
 Settings are stored in `~/.giscode/config.json`. Editing that file by hand works,
 but close GisCode first so changes are not overwritten.
@@ -356,8 +385,15 @@ Knowing the limits saves time:
 - **No model downloads.** You supply GGUF files.
 - **No Ollama, and no connection to LM Studio's API.** See
   [`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md).
-- **No installer, no background service, no auto-update.** You run it from
-  source.
+- **No background service and no auto-update.** The packaged build is installed
+  and removed per user by `GisCodeSetup.exe`; a source checkout is removed by
+  deleting its folder.
+- **No unrequested paid calls.** The OpenAI provider is disabled until you
+  enable billable calls; nothing is charged automatically. ChatGPT plan usage
+  never falls back to API billing.
+- **No browser credential harvesting.** Sign in with ChatGPT uses the official
+  OAuth flow in your system browser; GisCode never reads cookies, passwords or
+  MFA codes.
 - **No telemetry or analytics.** Nothing reports usage anywhere.
 - **No working ad provider.** The AdSpace panel says so and shows nothing.
 - **Pro tools are absent**, not hidden behind a paywall in this build.
@@ -377,6 +413,8 @@ the exact text shown in Model Manager.
 
 - [`INSTALLATION.md`](INSTALLATION.md) — install and first launch.
 - [`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md) — servers, model folders, providers.
+- [`OPENAI_DIRECT.md`](OPENAI_DIRECT.md) — the optional direct OpenAI API route.
+- [`CHATGPT_PLAN.md`](CHATGPT_PLAN.md) — the optional ChatGPT plan route.
 - [`MODEL_COMPATIBILITY.md`](MODEL_COMPATIBILITY.md) — formats, memory, model
   choice.
 - [`QUICKSTART.md`](QUICKSTART.md) — one-page install.
