@@ -70,15 +70,16 @@ Qualified Linux result: Ubuntu 24.04, Python 3.13, Tk/Xvfb, `--init`: **2143 pas
 
 ### Hosted CI note (new, 2026-11-13)
 
-The GitHub `ubuntu-latest` label has moved to Ubuntu 26.04. On that image the full suite repeatedly failed one untouched mock-auth test (`test_chatgpt_siwc.py::test_reauthorization_identity_change_is_explicit`) with a 20-second loopback timeout. The test module passes alone, and the same full suite passes on Ubuntu 24.04, including CI after the workflow was pinned to `ubuntu-24.04`. Server instrumentation showed the mock server was created but its request thread did not always run under 26.04. This is recorded as a **hosted-runner/test-harness scheduling limitation**, not a product pass or a reason to weaken the test. CI now uses the qualified Ubuntu 24.04 image.
+The GitHub `ubuntu-latest` label moved to Ubuntu 26.04, and the full suite repeatedly failed one untouched mock-auth test (`test_chatgpt_siwc.py`) with a 20-second loopback timeout. The test module passed alone. The same intermittent timeout later appeared on Ubuntu 24.04 and on Windows, varying which SIWC test failed; server instrumentation showed the mock server was created but a request thread did not always run after the full suite had accumulated unrelated threads. This is a **test-harness scheduling limitation**, not a product failure. CI is pinned to the qualified Ubuntu 24.04 image and now runs the SIWC protocol file in its own pytest process on both platforms; the remaining tests run in a second process. **Every test still runs**; no assertion, timeout or test was removed. Final code head `7f67d97` is green on both runners (runs `43492926349` and `43492732038`).
 
 ## 5. Regression and compatibility totals
 
 | Check | Result |
 | --- | --- |
-| Windows full suite | **2203 passed, 40 skipped, 0 failed** (`logs/core_full.log`) |
+| Windows full suite (local, historical) | **2203 passed, 40 skipped, 0 failed** (`logs/core_full.log`) |
+| Windows hosted CI (`7f67d97`) | **50 passed** (SIWC) + **2149 passed, 44 skipped** (rest), 0 failed |
 | Windows targeted onboarding/installer suite | **83 passed** (`logs/core_targeted.log`) |
-| Linux Ubuntu 24.04 / Python 3.13 | **2143 passed, 100 skipped, 0 failed** (`logs/core_ubuntu_24_04_py313.log`) |
+| Linux Ubuntu 24.04 / Python 3.13 | **2143 passed, 100 skipped, 0 failed** (`logs/core_ubuntu_24_04_py313.log`); hosted CI **48 passed, 2 skipped** (SIWC) + **2095 passed, 98 skipped** (rest), 0 failed |
 | Installer lifecycle in the clean TPM VM | **51 passed, 0 failed** |
 | Core/Pro independence and edition boundary (re-run 2026-11-13) | **28 passed, 2 skipped** |
 | Lock-file hash verification | **18/18** downloaded artifacts hash-verified |
@@ -118,7 +119,7 @@ Artifacts were built with PyInstaller 6.22.2 from the verified working tree and 
 - PR **#8** is open, non-draft, `MERGEABLE`, base `main`, head `feat/core-onboarding-and-integration`, 17 commits.
 - PR #7 was already merged at `dc45392`; the new work was branched from `origin/main`, not force-pushed over the merged branch.
 - PR #8 contains the substantive qualification commit `8ea4338` plus CI-only diagnostic/cleanup commits. The final tree is clean of diagnostic workflows and diagnostic test code; the PR diff contains only the verified Core changes and the Ubuntu 24.04 CI pin.
-- CI on PR #8: **Ubuntu 24.04 passed** on `337e393`; Windows result is recorded in the final delivery message / PR checks at completion time.
+- CI on PR #8: **Ubuntu 24.04 and Windows both passed** on code head `7f67d97` (runs `43492926349` and `43492732038`). The SIWC protocol suite is isolated into its own pytest process on each platform; every test is still run.
 - Existing public release `v0.1.0` has **0 assets**. PRs #5 and #6 (Dependabot) remain open and were not merged.
 - No merge, tag, signing, public release or deployment was performed.
 
@@ -184,7 +185,7 @@ Verified public evidence, not manufactured:
 3. **SignPath blocker — policy roles:** replace both `OWNER-FILL` entries in `CODE_SIGNING_POLICY.md` with real GitHub team/member links. Requires owner input.
 4. **SignPath blocker — reputation:** public reputation is not independently established (single contributor, 0 stars/forks, no external review/adoption). This cannot be manufactured; it needs time and genuine public activity.
 5. **SignPath process:** do not submit the application or create the Foundation organization until review/acceptance. Requires explicit approval.
-6. **Evidence limitations retained:** Secure Boot not verified; no Ollama/model inference in the clean guest; repair is reinstall-equivalent by design; GUI interaction limited to launch/onboarding and `--gui-check`; hosted Ubuntu 26.04 mock-server scheduling flake documented and CI pinned to qualified 24.04; private Pro source not inspected.
+6. **Evidence limitations retained:** Secure Boot not verified; no Ollama/model inference in the clean guest; repair is reinstall-equivalent by design; GUI interaction limited to launch/onboarding and `--gui-check`; hosted mock-server scheduling flake documented; CI pinned to qualified Ubuntu 24.04 and SIWC isolated per platform; private Pro source not inspected.
 
 ## 15. Final decision
 
