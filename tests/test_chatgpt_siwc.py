@@ -134,6 +134,13 @@ class _Server:
             def log_message(self, *args):
                 return
 
+            def _diag(self, message: str) -> None:
+                try:
+                    with open("/tmp/siwc-server.log", "a", encoding="utf-8") as handle:
+                        handle.write(f"{os.getpid()} {threading.current_thread().name} {message}\n")
+                except OSError:
+                    pass
+
             def _send_json(self, payload: dict, status: int = 200) -> None:
                 raw = json.dumps(payload).encode()
                 self.send_response(status)
@@ -152,6 +159,7 @@ class _Server:
 
             def do_GET(self):  # noqa: N802
                 path = urllib.parse.urlsplit(self.path).path
+                self._diag(f"GET {path}")
                 if path == "/.well-known/openid-configuration":
                     self._send_json(
                         {
@@ -375,6 +383,8 @@ class _Server:
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.httpd.daemon_threads = True
+        with open("/tmp/siwc-server.log", "a", encoding="utf-8") as handle:
+            handle.write(f"{os.getpid()} created {self.httpd.server_address[1]}\n")
 
     @property
     def base(self) -> str:

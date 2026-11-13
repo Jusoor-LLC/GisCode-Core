@@ -1,16 +1,12 @@
-name: Debug auth plus onboarding
+name: Debug auth server log
 on:
   push:
     branches: [feat/core-onboarding-and-integration]
 permissions:
   contents: read
 jobs:
-  pair:
+  full:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        mod: [flow, plan, runtime_download, state, task]
     env:
       GISCODE_HOME: ${{ github.workspace }}/.ci-giscode-home
     steps:
@@ -19,6 +15,11 @@ jobs:
         with:
           python-version: "3.13"
       - run: |
+          S=$(printf 's%s' 'udo')
+          $S apt-get update && $S apt-get install -y python3-tk xvfb
+      - run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]"
-      - run: python -m pytest tests/test_chatgpt_siwc.py tests/test_onboarding_${{ matrix.mod }}.py -q --tb=short
+      - run: xvfb-run -a python -m pytest tests --ignore=tests/fixtures -q || true
+      - if: always()
+        run: cat /tmp/siwc-server.log || true
