@@ -1,0 +1,130 @@
+117 INFO: PyInstaller: 6.22.2, contrib hooks: 2026.7
+118 INFO: Python: 3.13.15
+135 INFO: Platform: Windows-11-10.0.26300-SP0
+135 INFO: Python environment: C:\Users\Gtabyah\AppData\Local\Programs\Python\Python313
+138 INFO: Removing temporary files and cleaning cache in C:\Users\Gtabyah\AppData\Local\pyinstaller
+111 WARNING: Failed to collect submodules for 'webview.platforms.android' because importing 'webview.platforms.android' raised: ModuleNotFoundError: No module named 'android'
+374 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\Gtabyah\\Desktop\\Projects\\GisCode-Core-STAB-01-2026-11-07\\clean-checkout',
+ 'C:\\Users\\Gtabyah\\Desktop\\Projects\\GisCode-Core-STAB-01-2026-11-07\\clean-checkout',
+ 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\python313.zip',
+ 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\DLLs',
+ 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib',
+ 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313',
+ 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages',
+ 'C:\\Users\\Gtabyah\\Desktop\\Projects\\GisCode\\src',
+ 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\win32',
+ 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\win32\\lib',
+ 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pythonwin',
+ 'C:\\Users\\Gtabyah\\Desktop\\Projects\\GisCode-Core-STAB-01-2026-11-07\\clean-checkout']
+pygame 2.6.1 (SDL 2.28.4, Python 3.13.15)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+715 INFO: Appending 'datas' from .spec
+715 INFO: checking Analysis
+716 INFO: Building Analysis because Analysis-00.toc is non existent
+716 INFO: Looking for Python shared library...
+716 INFO: Using Python shared library: C:\Users\Gtabyah\AppData\Local\Programs\Python\Python313\python313.dll
+716 INFO: Running Analysis Analysis-00.toc
+716 INFO: Target bytecode optimization level: 0
+716 INFO: Initializing module dependency graph...
+717 INFO: Initializing module graph hook caches...
+726 INFO: Analyzing modules for base_library.zip ...
+1320 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+1834 INFO: Processing standard module hook 'hook-math.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+1988 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+2624 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+3398 INFO: Caching module dependency graph...
+3423 INFO: Analyzing C:\Users\Gtabyah\Desktop\Projects\GisCode-Core-STAB-01-2026-11-07\clean-checkout\giscode\main.py
+3479 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+3588 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+3774 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+3778 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+3820 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+3858 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+4466 INFO: Processing standard module hook 'hook-psutil.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+4631 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+4662 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+5176 INFO: Processing standard module hook 'hook-webbrowser.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+5433 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+5434 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+5633 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+5958 INFO: Processing standard module hook 'hook-PIL.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+6030 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+6267 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+6593 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+7063 INFO: Processing standard module hook 'hook-webview.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\webview\\__pyinstaller'
+7539 INFO: Processing standard module hook 'hook-jinja2.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+7547 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+7548 INFO: SetuptoolsInfo: initializing cached setuptools info...
+8371 INFO: Processing pre-safe-import-module hook 'hook-gi.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8455 INFO: Processing standard module hook 'hook-clr.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pythonnet\\_pyinstaller'
+8488 INFO: Processing standard module hook 'hook-clr_loader.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+8555 INFO: Processing standard module hook 'hook-pycparser.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+8657 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+8665 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8682 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8683 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
+8690 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8690 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
+8784 INFO: Processing standard module hook 'hook-_osx_support.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+8795 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9003 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+9004 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9009 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9010 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+9344 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9345 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
+9682 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9683 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
+10061 INFO: Processing standard module hook 'hook-cryptography.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+11082 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
+11390 INFO: Analyzing hidden import 'webview.__pyinstaller'
+11390 INFO: Analyzing hidden import 'webview.__pyinstaller.hook-webview'
+11402 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+11419 INFO: Processing standard module hook 'hook-importlib_metadata.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+11433 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+11452 INFO: Processing standard module hook 'hook-win32ctypes.core.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+12267 INFO: Analyzing hidden import 'webview._version'
+12268 INFO: Analyzing hidden import 'PIL.ImageTk'
+12271 INFO: Processing module hooks (post-graph stage)...
+12272 WARNING: Hidden import "pycparser.lextab" not found!
+12272 WARNING: Hidden import "pycparser.yacctab" not found!
+12452 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+12530 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+12546 INFO: Performing binary vs. data reclassification (1069 entries)
+12663 INFO: Looking for ctypes DLLs
+12729 INFO: Analyzing run-time hooks ...
+12729 INFO: Including custom run-time hook 'C:\\Users\\Gtabyah\\AppData\\Local\\Temp\\giscode_acceptance_hook_sqjz2qed\\pyi_rth_giscode_acceptance.py'
+12738 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+12739 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+12741 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+12742 INFO: Including run-time hook 'pyi_rth_cryptography_openssl.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+12743 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+12743 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\Gtabyah\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+12763 INFO: Creating base_library.zip...
+12780 INFO: Looking for dynamic libraries
+13536 INFO: Extra DLL search directories (AddDllDirectory): []
+13536 INFO: Extra DLL search directories (PATH): []
+14035 INFO: Warnings written to C:\Users\Gtabyah\Desktop\Projects\GisCode-Core-STAB-01-2026-11-07\clean-checkout\build\core-completion-2026-11-13\work-acceptance\GisCodeAcceptanceHardened\warn-GisCodeAcceptanceHardened.txt
+14082 INFO: Graph cross-reference written to C:\Users\Gtabyah\Desktop\Projects\GisCode-Core-STAB-01-2026-11-07\clean-checkout\build\core-completion-2026-11-13\work-acceptance\GisCodeAcceptanceHardened\xref-GisCodeAcceptanceHardened.html
+14120 INFO: checking PYZ
+14120 INFO: Building PYZ because PYZ-00.toc is non existent
+14120 INFO: Building PYZ (ZlibArchive) C:\Users\Gtabyah\Desktop\Projects\GisCode-Core-STAB-01-2026-11-07\clean-checkout\build\core-completion-2026-11-13\work-acceptance\GisCodeAcceptanceHardened\PYZ-00.pyz
+14699 INFO: Building PYZ (ZlibArchive) C:\Users\Gtabyah\Desktop\Projects\GisCode-Core-STAB-01-2026-11-07\clean-checkout\build\core-completion-2026-11-13\work-acceptance\GisCodeAcceptanceHardened\PYZ-00.pyz completed successfully.
+14736 INFO: checking PKG
+14737 INFO: Building PKG because PKG-00.toc is non existent
+14737 INFO: Building PKG (CArchive) GisCodeAcceptanceHardened.pkg
+18753 INFO: Building PKG (CArchive) GisCodeAcceptanceHardened.pkg completed successfully.
+18766 INFO: Bootloader C:\Users\Gtabyah\AppData\Local\Programs\Python\Python313\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\run.exe
+18766 INFO: checking EXE
+18766 INFO: Building EXE because EXE-00.toc is non existent
+18766 INFO: Building EXE from EXE-00.toc
+18766 INFO: Copying bootloader EXE to C:\Users\Gtabyah\Desktop\Projects\GisCode-Core-STAB-01-2026-11-07\clean-checkout\build\core-completion-2026-11-13\dist-acceptance\GisCodeAcceptanceHardened.exe
+18772 INFO: Copying icon to EXE
+18797 INFO: Copying version information to EXE
+18822 INFO: Copying 0 resources to EXE
+18822 INFO: Embedding manifest in EXE
+18845 INFO: Appending PKG archive to EXE
+18982 INFO: Fixing EXE headers
+19284 INFO: Building EXE from EXE-00.toc completed successfully.
+19298 INFO: Build complete! The results are available in: C:\Users\Gtabyah\Desktop\Projects\GisCode-Core-STAB-01-2026-11-07\clean-checkout\build\core-completion-2026-11-13\dist-acceptance

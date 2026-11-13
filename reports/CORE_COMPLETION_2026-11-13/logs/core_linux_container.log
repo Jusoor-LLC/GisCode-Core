@@ -1,0 +1,117 @@
+debconf: unable to initialize frontend: Dialog
+debconf: (TERM is not set, so the dialog frontend is not usable.)
+debconf: falling back to frontend: Readline
+debconf: unable to initialize frontend: Readline
+debconf: (This frontend requires a controlling tty.)
+debconf: falling back to frontend: Teletype
+debconf: unable to initialize frontend: Teletype
+debconf: (This frontend requires a controlling tty.)
+debconf: falling back to frontend: Noninteractive
+............sssssssssssss...ss..ss...........................s..s....... [  3%]
+........................................................................ [  6%]
+..................................................................s..... [  9%]
+.......s.......ssss..................................................... [ 12%]
+........................................................................ [ 16%]
+........................................................................ [ 19%]
+...............s..s........s.........FF......ss...................s..... [ 22%]
+...............s.............................................s.......... [ 25%]
+........................................................................ [ 28%]
+......s................................................................. [ 32%]
+....s..............................................................s.... [ 35%]
+.............................s.......................................... [ 38%]
+...................................ss...............sssss.....s......... [ 41%]
+..........................sss........................................... [ 44%]
+........................................................................ [ 48%]
+........................................................................ [ 51%]
+........................................................................ [ 54%]
+...............................................s........................ [ 57%]
+........................................................................ [ 60%]
+........................................................................ [ 64%]
+......................................................................s. [ 67%]
+........................................................................ [ 70%]
+........................................................................ [ 73%]
+........................................................................ [ 77%]
+..................................s..........s.......................... [ 80%]
+........................................................................ [ 83%]
+......s.................................ssssss...s...................... [ 86%]
+.................................................sssssssss.............. [ 89%]
+........................................................................ [ 93%]
+.........................ss............................................. [ 96%]
+.....................................sssssssssssssssssssssssss.....ssss. [ 99%]
+...........                                                              [100%]
+=================================== FAILURES ===================================
+____________ test_a_timed_out_command_is_killed_with_its_grandchild ____________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-0/test_a_timed_out_command_is_ki0')
+
+    def test_a_timed_out_command_is_killed_with_its_grandchild(tmp_path):
+        executor, request = _tree_request(tmp_path, timeout=5)
+    
+        result = executor.execute(request)
+    
+        assert result.status == CommandStatus.TIMED_OUT
+        assert result.timed_out is True
+        assert result.error == "command timed out after 5 s"
+        child_pid, grandchild_pid = _pids(tmp_path)
+        assert _wait_until_dead(child_pid), "the command's own process must not survive its timeout"
+>       assert _wait_until_dead(grandchild_pid), (
+            "the grandchild that holds the pipes open must be killed too, or a "
+            "bounded command still holds the worker"
+        )
+E       AssertionError: the grandchild that holds the pipes open must be killed too, or a bounded command still holds the worker
+E       assert False
+E        +  where False = _wait_until_dead(909)
+
+tests/test_command_bounding.py:107: AssertionError
+___________ test_cancel_kills_the_process_tree_and_reports_cancelled ___________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-0/test_cancel_kills_the_process_0')
+
+    def test_cancel_kills_the_process_tree_and_reports_cancelled(tmp_path):
+        executor, request = _tree_request(tmp_path, timeout=600)
+        results: list = []
+    
+        worker = threading.Thread(target=lambda: results.append(executor.execute(request)))
+        worker.start()
+        # Wait for the child to exist before cancelling.
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not (tmp_path / "child.pid").exists():
+            time.sleep(0.05)
+        assert (tmp_path / "child.pid").exists(), "the dummy child never started"
+    
+        executor.cancel()
+        worker.join(timeout=60)
+    
+        assert not worker.is_alive(), "cancel must release the waiting worker"
+        assert results and results[0].status == CommandStatus.CANCELLED
+        assert results[0].cancelled is True
+        assert results[0].timed_out is False
+        child_pid, grandchild_pid = _pids(tmp_path)
+        assert _wait_until_dead(child_pid)
+>       assert _wait_until_dead(grandchild_pid)
+E       assert False
+E        +  where False = _wait_until_dead(912)
+
+tests/test_command_bounding.py:134: AssertionError
+=============================== warnings summary ===============================
+giscode/orchestration/types.py:64
+  /src/giscode/orchestration/types.py:64: PytestCollectionWarning: cannot collect test class 'TestRequest' because it has a __init__ constructor (from: tests/test_checkpoint_restore_safety.py)
+    @dataclass
+
+giscode/orchestration/types.py:64
+  /src/giscode/orchestration/types.py:64: PytestCollectionWarning: cannot collect test class 'TestRequest' because it has a __init__ constructor (from: tests/test_orchestration.py)
+    @dataclass
+
+giscode/orchestration/types.py:73
+  /src/giscode/orchestration/types.py:73: PytestCollectionWarning: cannot collect test class 'TestResult' because it has a __init__ constructor (from: tests/test_orchestration.py)
+    @dataclass
+
+giscode/orchestration/types.py:29
+  /src/giscode/orchestration/types.py:29: PytestCollectionWarning: cannot collect test class 'TestStatus' because it has a __init__ constructor (from: tests/test_orchestration.py)
+    class TestStatus(Enum):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_command_bounding.py::test_a_timed_out_command_is_killed_with_its_grandchild
+FAILED tests/test_command_bounding.py::test_cancel_kills_the_process_tree_and_reports_cancelled
+2 failed, 2141 passed, 100 skipped, 4 warnings in 240.73s (0:04:00)

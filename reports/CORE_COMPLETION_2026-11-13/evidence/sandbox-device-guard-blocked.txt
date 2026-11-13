@@ -1,0 +1,23 @@
+﻿DEBUG_START
+SOURCE_EXISTS=True
+SOURCE_BYTES=42144846
+SOURCE_SIG=NotSigned
+LOCAL_EXISTS=True
+LOCAL_SIG=NotSigned
+AMP_EXIT=
+AMP_OUT=
+CMD_EXIT=4551
+CMD_OUT=cmd.exe : 'C:\setup\GisCodeSetup.exe' was blocked by your organization's 
+Device Guard policy.
+At C:\test\debug.ps1:20 char:8
++ $o2 = (& cmd.exe /c "C:\setup\GisCodeSetup.exe --version" 2>&1 | Out- ...
++        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ('C:\setup\GisCo...e Guard policy. 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Contact your support person for more info.
+
+SP_ERROR=This command cannot be run due to the error: An Application Control policy has blocked this file.
+LOCAL_AFTER=True
+DEBUG_DONE

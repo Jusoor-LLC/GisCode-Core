@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
     env:
       GISCODE_HOME: ${{ github.workspace }}/.ci-giscode-home
     steps:
@@ -40,11 +40,21 @@ jobs:
 
       - name: Test (Windows)
         if: runner.os == 'Windows'
-        run: python -m pytest tests --ignore=tests/fixtures -q
+        run: |
+          # Isolate the SIWC mock-server suite for the same reason as Linux.
+          python -m pytest tests/test_chatgpt_siwc.py -q
+          python -m pytest tests --ignore=tests/fixtures `
+            --ignore=tests/test_chatgpt_siwc.py -q
 
       - name: Test (Linux, headless)
         if: runner.os == 'Linux'
-        run: xvfb-run -a python -m pytest tests --ignore=tests/fixtures -q
+        run: |
+          # The SIWC protocol suite starts a loopback OIDC server per test.
+          # Give it its own process so accumulated threads from unrelated GUI
+          # tests cannot starve a mock-server request thread.
+          xvfb-run -a python -m pytest tests/test_chatgpt_siwc.py -q
+          xvfb-run -a python -m pytest tests --ignore=tests/fixtures \
+            --ignore=tests/test_chatgpt_siwc.py -q
 
       - name: GUI startup check (Windows)
         if: runner.os == 'Windows'

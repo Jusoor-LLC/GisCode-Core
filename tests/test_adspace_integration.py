@@ -17,6 +17,7 @@ from giscode.ads.providers import (
     AdCreative,
     AppLovinProvider,
     HousePromotionProvider,
+    MicrosoftAdvertisingProvider,
     ProviderAvailability,
     UnityAdsProvider,
 )
@@ -97,6 +98,43 @@ def test_applovin_reports_that_it_cannot_serve_windows():
     assert state.source.startswith("https://legal.applovin.com")
 
 
+def test_microsoft_advertising_is_a_publisher_blocker_not_entra():
+    settings = FakeSettings(
+        **{
+            "ads.enabled": True,
+            "ads.consent": True,
+            "ads.provider": "microsoft_advertising",
+        }
+    )
+    state = AdSpace(settings=settings).state()
+
+    assert state.available is False
+    assert state.show_ad is False
+    assert state.source.startswith("https://learn.microsoft.com/")
+    reason = state.reason.lower()
+    # It must say why the platform cannot serve ads, and must not confuse the
+    # advertiser API's identity layer with an ad server.
+    assert "advertiser" in reason
+    assert "uwp" in reason
+    assert "entra" in reason
+    assert "ad server" in reason
+
+
+def test_microsoft_advertising_is_not_a_core_or_pro_dependency():
+    provider = MicrosoftAdvertisingProvider()
+    assert provider.name == "microsoft_advertising"
+    assert provider.availability().available is False
+    assert provider.creative() is None
+    # No identity SDK may be imported to decide that an unavailable ad network
+    # is unavailable; Entra is not part of the ad path.
+    import giscode.ads.providers as providers_module
+
+    source = providers_module.__file__
+    text = open(source, encoding="utf-8").read()
+    assert "import msal" not in text
+    assert "import identity" not in text
+
+
 def test_an_unknown_provider_is_reported_not_crashed():
     settings = FakeSettings(
         **{"ads.enabled": True, "ads.consent": True, "ads.provider": "not-a-provider"}
@@ -169,19 +207,24 @@ def test_the_service_makes_no_network_request(monkeypatch):
     assert AdSpace(settings=settings).state().show_ad is True
 
 
-def test_provider_reports_cover_both_requested_providers():
+def test_provider_reports_cover_every_known_provider():
     state = AdSpace().state()
     names = {report.name for report in state.providers}
-    assert {"unity_ads", "applovin"} <= names
+    assert {"unity_ads", "applovin", "microsoft_advertising"} <= names
     for report in state.providers:
-        if report.name in {"unity_ads", "applovin"}:
+        if report.name in {"unity_ads", "applovin", "microsoft_advertising"}:
             assert report.availability.available is False
             assert report.availability.source
 
 
 def test_the_provider_adapters_are_independent_of_the_service():
     """The adapter interface is what a new provider implements."""
-    for provider in (UnityAdsProvider(), AppLovinProvider(), HousePromotionProvider()):
+    for provider in (
+        UnityAdsProvider(),
+        AppLovinProvider(),
+        MicrosoftAdvertisingProvider(),
+        HousePromotionProvider(),
+    ):
         availability = provider.availability()
         assert isinstance(availability, ProviderAvailability)
         creative = provider.creative()

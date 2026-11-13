@@ -165,7 +165,8 @@ class AdSpace:
                 available=False,
                 reason=(
                     "No advertising provider is enabled. Unity Ads and AppLovin "
-                    "serve mobile platforms only, so neither can run in a Windows "
+                    "serve mobile platforms only, Microsoft Advertising's Windows "
+                    "ad SDK was UWP-only and retired, so none can serve a Windows "
                     "desktop build."
                 ),
                 **base,

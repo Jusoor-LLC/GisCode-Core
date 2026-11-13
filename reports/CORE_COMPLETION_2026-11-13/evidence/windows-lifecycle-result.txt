@@ -1,0 +1,102 @@
+﻿GISCODE_CORE_INSTALLER_LIFECYCLE
+STARTED=2026-11-13T16:59:44.6234708Z
+OS=Microsoft Windows 11 Enterprise Evaluation 10.0.26300
+COMPUTER=GISCODECLEAN-VB USER=giscode
+PASS|setup_local_copy|C:\setup\GisCodeSetup.exe
+PASS|legacy_setup_present|C:\test\GisCodeSetup-legacy.exe
+PASS|fresh_install_exit|exit=0 out=INSTALLED C:\GisCodeLifecycle
+EXE_SHA256 ef36daa3e030866ea33dc9cc84d516cc473458a2da94f4b21b2de2900b81ebf3
+SHORTCUT C:\Users\giscode\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\GisCode.lnk
+UPGRADED False err=
+PASS|fresh_install_exe|C:\GisCodeLifecycle\GisCode.exe
+PASS|fresh_install_setup_copy|uninstaller copy present
+PASS|fresh_install_shortcut|C:\Users\giscode\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\GisCode.lnk
+PASS|fresh_install_registry|HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\GisCode
+PASS|fresh_install_version|DisplayVersion=0.1.1
+PASS|fresh_install_publisher|Publisher=Jusoor LLC
+PASS|fresh_install_location|InstallLocation=C:\GisCodeLifecycle
+PASS|fresh_install_payload_identity|sha256=ef36daa3e030866ea33dc9cc84d516cc473458a2da94f4b21b2de2900b81ebf3
+PASS|installed_app_gui_check|exit=0 tail=GUI_CHECK_OK
+PASS|upgrade_legacy_exit|exit=0 out=INSTALLED C:\GisCodeLifecycle
+EXE_SHA256 316703b005921035701d2711534f1055e86f6f1b9c75f48e403c78e8460a0d2f
+SHORTCUT C:\Users\giscode\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\GisCode.lnk
+UPGRADED True
+PASS|upgrade_legacy_reports_existing|legacy installer replaced the new build and reported UPGRADED True
+PASS|upgrade_exit|exit=0 out=INSTALLED C:\GisCodeLifecycle
+EXE_SHA256 ef36daa3e030866ea33dc9cc84d516cc473458a2da94f4b21b2de2900b81ebf3
+SHORTCUT C:\Users\giscode\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\GisCode.lnk
+UPGRADED True
+PASS|upgrade_reports_existing|output reports UPGRADED True
+PASS|upgrade_payload_replaced|after=EF36DAA3E030866EA33DC9CC84D516CC473458A2DA94F4B21B2DE2900B81EBF3 expected=EF36DAA3E030866EA33DC9CC84D516CC473458A2DA94F4B21B2DE2900B81EBF3
+PASS|upgrade_payload_identity|rebuilt app restored
+PASS|upgrade_user_workspace_kept|C:\GisCodeLifecycle\workspace\user-notes.txt
+PASS|upgrade_user_profile_kept|C:\Users\giscode\.giscode\user-profile.txt
+PASS|upgrade_registry_present|HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\GisCode
+PASS|upgrade_shortcut_present|C:\Users\giscode\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\GisCode.lnk
+PASS|repair_not_offered_is_declared|NoRepair=1; reinstall above is the supported repair path
+PASS|repair_reinstall_exit|exit=0
+PASS|repair_user_workspace_kept|C:\GisCodeLifecycle\workspace\user-notes.txt
+PASS|locked_uninstall_reports_incomplete|exit=2 out=REMOVED 9
+INSTALL_DIR_EXISTS True
+SHORTCUT_EXISTS False
+REGISTRY_EXISTS True
+PROFILE_EXISTS True
+APP_PROCESSES_STOPPED 0
+USER_DATA_KEPT C:\GisCodeLifecycle\workspace
+LEFTOVER GisCode.exe
+CLEANUP_LOG C:\Users\giscode\AppData\Local\GisCode-uninstall.log
+CLEANUP INCOMPLETE
+PASS|locked_uninstall_keeps_registry|registry retained while program file remains
+PASS|locked_uninstall_keeps_exe|locked executable retained
+PASS|unlock_uninstall_completes|exit=0 out=REMOVED 1
+INSTALL_DIR_EXISTS True
+SHORTCUT_EXISTS False
+REGISTRY_EXISTS False
+PROFILE_EXISTS True
+APP_PROCESSES_STOPPED 0
+USER_DATA_KEPT C:\GisCodeLifecycle\workspace
+CLEANUP_LOG C:\Users\giscode\AppData\Local\GisCode-uninstall.log
+CLEANUP COMPLETE
+PASS|unlock_uninstall_registry_gone|registry absent
+PASS|unlock_uninstall_shortcut_gone|shortcut absent
+PASS|unlock_uninstall_exe_gone|program executable absent
+PASS|uninstall_user_workspace_kept|C:\GisCodeLifecycle\workspace\user-notes.txt
+PASS|uninstall_user_profile_kept|C:\Users\giscode\.giscode\user-profile.txt
+PASS|reinstall_before_running_test|exit=0
+PASS|app_started_for_running_test|running_processes=2
+PASS|running_uninstall_exit|exit=0 out=REMOVED 3
+INSTALL_DIR_EXISTS True
+SHORTCUT_EXISTS False
+REGISTRY_EXISTS False
+PROFILE_EXISTS True
+APP_PROCESSES_STOPPED 2
+USER_DATA_KEPT C:\GisCodeLifecycle\workspace
+CLEANUP_LOG C:\Users\giscode\AppData\Local\GisCode-uninstall.log
+CLEANUP COMPLETE
+PASS|running_uninstall_stopped_app|APP_PROCESSES_STOPPED > 0
+PASS|running_uninstall_no_process_left|remaining=0
+PASS|running_uninstall_registry_gone|registry absent
+PASS|running_uninstall_exe_gone|program executable absent
+PASS|running_user_workspace_kept|C:\GisCodeLifecycle\workspace\user-notes.txt
+PASS|self_uninstall_install|exit=0
+PASS|self_uninstall_exit|exit=0 out=REMOVED 2
+INSTALL_DIR_EXISTS True
+SHORTCUT_EXISTS False
+REGISTRY_EXISTS True
+PROFILE_EXISTS True
+APP_PROCESSES_STOPPED 0
+DEFERRED_CLEANUP_STARTED C:\Users\giscode\AppData\Local\Temp\giscode-uninstall-4532.cmd
+USER_DATA_KEPT C:\GisCodeLifecycle\workspace
+LEFTOVER GisCodeSetup.exe
+CLEANUP_LOG C:\Users\giscode\AppData\Local\GisCode-uninstall.log
+CLEANUP DEFERRED
+PASS|self_uninstall_setup_deleted|deferred cleanup removed the running uninstaller
+PASS|self_uninstall_registry_gone|registry absent
+PASS|self_uninstall_shortcut_gone|shortcut absent
+PASS|self_uninstall_exe_gone|program executable absent
+PASS|self_uninstall_user_workspace_kept|C:\GisCodeLifecycle\workspace\user-notes.txt
+PASS|self_uninstall_user_profile_kept|C:\Users\giscode\.giscode\user-profile.txt
+PASS|cleanup_log_written|C:\Users\giscode\AppData\Local\GisCode-uninstall.log
+SUMMARY pass=51 fail=0
+FINISHED=2026-11-13T17:01:21.2244428Z
+LIFECYCLE_DONE

@@ -19,13 +19,19 @@ Uninstall lifecycle (see :func:`uninstall`):
    image path still lies inside that directory, never by image name;
 2. files are deleted with bounded retries, so a process that is still exiting
    does not fail the uninstall;
-3. the running uninstaller cannot delete itself, so that single file is handed
+3. empty directories left by the application (it scaffolds
+   ``workspace\\{src,tests,docs,build,logs}`` in its working directory on first
+   launch) are pruned, and the install directory is removed once nothing but
+   those folders is left. A folder that still holds files is *user content*: it
+   is never deleted, so an uninstall can leave the install path in place with
+   user files in it while still removing the program itself;
+4. the running uninstaller cannot delete itself, so that single file is handed
    to a detached ``cmd`` helper which waits for this process to exit, deletes it,
-   removes the directory, then deletes the registry entry and records what it did
+   prunes empty folders, then deletes the registry entry and records what it did
    in ``%LOCALAPPDATA%\\GisCode-uninstall.log``;
-4. the result distinguishes *complete*, *deferred* and *incomplete*, and an
-   incomplete uninstall exits non-zero while keeping the registry entry so it can
-   be retried.
+5. the result distinguishes *complete*, *deferred* and *incomplete*, reports
+   user content that was deliberately kept, and an incomplete uninstall exits
+   non-zero while keeping the registry entry so it can be retried.
 
 Usage:
     GisCodeSetup.exe                 # small GUI
@@ -451,6 +457,29 @@ def unlink_with_retry(path: Path, retries: int = 40, delay: float = 0.25) -> boo
     return not path.exists()
 
 
+def remove_empty_directories(root: Path) -> list[str]:
+    """Remove empty directories below *root*, deepest first. Never deletes files.
+
+    The application creates ``workspace\\{src,tests,docs,build,logs}`` in its
+    working directory (the install directory when started from the Start Menu),
+    so a used installation always has empty folders that ``rmdir`` would refuse
+    to remove. A folder that still contains anything is left alone: that content
+    belongs to the user, not to the program.
+    """
+    removed: list[str] = []
+    if not root.is_dir():
+        return removed
+    directories = sorted((p for p in root.rglob("*") if p.is_dir()),
+                         key=lambda p: len(p.parts), reverse=True)
+    for directory in directories:
+        try:
+            directory.rmdir()
+            removed.append(str(directory))
+        except OSError:
+            continue
+    return removed
+
+
 def defer_failure_log(log_path: Path, message: str) -> None:
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -495,17 +524,29 @@ def cleanup_script(pid: int, running: Path, target_dir: Path, log_path: Path,
         ":deleted",
         "rem clear anything else left behind, so an interrupted uninstall recovers",
         'del /f /q "%TARGET%\\*" >nul 2>&1',
-        'rmdir /q "%TARGET%" >nul 2>&1',
+        "rem prune empty folders bottom-up; folders holding user files stay",
+        'for /f "delims=" %%D in (\'dir /b /ad /s "%TARGET%" 2^>nul ^| "%SYS%\\sort.exe" /r\') do rd "%%D" >nul 2>&1',
+        'rd /q "%TARGET%" >nul 2>&1',
+        # Program file names come from the module constants, so the same helper
+        # serves a Pro-branded build without naming Core's executables.
+        f'set "PROGRAM_FILES={EXE_NAME} {SETUP_NAME}"',
+        'for %%F in (%PROGRAM_FILES%) do if exist "%TARGET%\\%%F" goto program_left',
+        "goto cleanup_done",
+        ":program_left",
+        f'echo %DATE% %TIME% DEFERRED_FAILED program_files_remain >>"%LOG%"',
+        "exit /b 4",
+        ":cleanup_done",
         'if exist "%TARGET%" (',
-        f'  echo %DATE% %TIME% DEFERRED_FAILED dir_still_exists >>"%LOG%"',
-        "  exit /b 4",
+        f'  echo %DATE% %TIME% DEFERRED_OK user_data_kept >>"%LOG%"',
+        ") else (",
+        f'  echo %DATE% %TIME% DEFERRED_OK install_dir_removed >>"%LOG%"',
         ")",
         f'"%SYS%\\reg.exe" delete "{registry_key}" /f >>"%LOG%" 2>&1',
         'if errorlevel 1 (',
         f'  echo %DATE% %TIME% DEFERRED_FAILED registry_delete_failed >>"%LOG%"',
         "  exit /b 5",
         ")",
-        f'echo %DATE% %TIME% DEFERRED_OK install_dir_removed registry_removed >>"%LOG%"',
+        f'echo %DATE% %TIME% DEFERRED_OK registry_removed >>"%LOG%"',
         # ``(goto)`` makes cmd stop reading this script before it removes
         # itself; without it cmd reports "The batch file cannot be found" and
         # exits non-zero for a cleanup that actually succeeded.
@@ -605,37 +646,35 @@ def uninstall(directory: Path | None = None, *, app_timeout: float = 15.0,
         if unlink_with_retry(entry, delete_retries, delete_delay):
             removed.append(str(entry))
 
+    # Empty folders (the app's ``workspace`` scaffold) are program leftovers;
+    # pruned deepest-first. Folders holding files are user content and stay.
+    removed.extend(remove_empty_directories(target))
+
     deferred = False
     script_path = ""
-    leftover: list[Path] = []
+    remaining = sorted(target.iterdir()) if target.is_dir() else []
+    program_left = [p for p in remaining if p.is_file()]
+    user_data_kept = [str(p) for p in remaining if p.is_dir()]
+    only_self_left = (self_inside and len(program_left) == 1
+                      and _same_file(program_left[0], running))
 
-    if self_inside:
-        leftover = sorted(p for p in target.iterdir()) if target.is_dir() else []
-        if leftover == [running] and allow_defer:
-            script = spawn_deferred_cleanup(os.getpid(), running, target, log_path)
-            if script is not None:
-                deferred = True
-                script_path = str(script)
-                defer_failure_log(log_path, f"DEFERRED_STARTED pid={os.getpid()} script={script}")
-    else:
-        if target.is_dir():
+    if only_self_left and allow_defer:
+        script = spawn_deferred_cleanup(os.getpid(), running, target, log_path)
+        if script is not None:
+            deferred = True
+            script_path = str(script)
+            defer_failure_log(log_path, f"DEFERRED_STARTED pid={os.getpid()} script={script}")
+
+    if not deferred:
+        if not remaining:
             try:
                 target.rmdir()
                 removed.append(str(target))
-            except OSError:
+            except OSError:  # pragma: no cover - raced with another writer
                 pass
-        if not target.is_dir():
-            remove_uninstall_entry()
-
-    if not deferred and target.is_dir():
-        leftover = sorted(target.iterdir())
-        if not leftover:
-            try:
-                target.rmdir()
-                removed.append(str(target))
-            except OSError:
-                leftover = sorted(target.iterdir())
-        if not target.is_dir():
+        if not program_left:
+            # Program files and folders are gone: anything still present is the
+            # user's own content, so the product is no longer installed here.
             remove_uninstall_entry()
 
     result = {
@@ -648,15 +687,20 @@ def uninstall(directory: Path | None = None, *, app_timeout: float = 15.0,
         "registry_exists": uninstall_entry_exists(),
         "profile_dir": str(profile),
         "profile_dir_exists": profile.exists(),
-        "leftover": [p.name for p in leftover],
-        "cleanup_complete": (not target.is_dir()) and not link.is_file()
-                            and not uninstall_entry_exists(),
+        "leftover": [p.name for p in program_left],
+        "user_data_kept": user_data_kept,
+        # Only a folder that still holds user content may survive a successful
+        # uninstall; an empty folder that could not be removed is a failure.
+        "cleanup_complete": (not deferred) and (not program_left)
+                            and not link.is_file()
+                            and not uninstall_entry_exists()
+                            and (not target.is_dir() or bool(user_data_kept)),
         "cleanup_log": str(log_path),
     }
     defer_failure_log(
         log_path,
-        "UNINSTALL result complete={0} deferred={1} leftover={2}".format(
-            result["cleanup_complete"], deferred, result["leftover"]),
+        "UNINSTALL result complete={0} deferred={1} leftover={2} user_data_kept={3}".format(
+            result["cleanup_complete"], deferred, result["leftover"], user_data_kept),
     )
     return result
 
@@ -708,8 +752,14 @@ def run_gui() -> int:
     def do_uninstall() -> None:
         result = uninstall(Path(directory.get()))
         report(f"Removed {len(result['removed'])} item(s); user data kept at {result['profile_dir']}")
+        if result["user_data_kept"]:
+            report("Kept your files in " + ", ".join(result["user_data_kept"]))
         if result["cleanup_complete"]:
-            messagebox.showinfo("Uninstalled", "Program files removed. Your chats and settings were kept.")
+            message = "Program files removed. Your chats and settings were kept."
+            if result["user_data_kept"]:
+                message += ("\n\nFiles you saved in the install folder were kept:\n"
+                            + "\n".join(result["user_data_kept"]))
+            messagebox.showinfo("Uninstalled", message)
         elif result["deferred_self_delete"]:
             messagebox.showinfo(
                 "Uninstall finishing",
@@ -718,7 +768,10 @@ def run_gui() -> int:
             messagebox.showerror(
                 "Uninstall incomplete",
                 "Some items could not be removed:\n"
-                + ("\n".join(result["leftover"]) or "a GisCode process is still running")
+                + ("\n".join(result["leftover"])
+                   or ("the install folder could not be removed"
+                       if result["install_dir_exists"]
+                       else "a GisCode process is still running"))
                 + f"\n\nDetails: {result['cleanup_log']}")
 
     buttons = ttk.Frame(root)
@@ -755,6 +808,8 @@ def main(argv: list[str]) -> int:
         print(f"APP_PROCESSES_STOPPED {len(result['app_processes']['found'])}")
         if result["deferred_self_delete"]:
             print(f"DEFERRED_CLEANUP_STARTED {result['cleanup_script']}")
+        for item in result["user_data_kept"]:
+            print(f"USER_DATA_KEPT {item}")
         for item in result["leftover"]:
             print(f"LEFTOVER {item}")
         print(f"CLEANUP_LOG {result['cleanup_log']}")

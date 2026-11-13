@@ -1,0 +1,55 @@
+.................................s...................................... [  3%]
+........................................................................ [  6%]
+........................................................................ [  9%]
+...............ssss..................................................... [ 12%]
+........................................................................ [ 16%]
+........................................................................ [ 19%]
+...........................s.................ss...................s..... [ 22%]
+...............s.............................................s.......... [ 25%]
+........................................................................ [ 28%]
+........................................................................ [ 32%]
+....s..............................................................s.... [ 35%]
+.............................s.......................................... [ 38%]
+...................................ss...............sssss............... [ 41%]
+..........................sss........................................... [ 44%]
+........................................................................ [ 48%]
+........................................................................ [ 51%]
+........................................................................ [ 54%]
+........................................................................ [ 57%]
+........................................................................ [ 60%]
+........................................................................ [ 64%]
+......................................................................s. [ 67%]
+........................................................................ [ 70%]
+........................................................................ [ 73%]
+........................................................................ [ 77%]
+..................................s..........s.......................... [ 80%]
+........................................................................ [ 83%]
+.....s...........................................s...................... [ 86%]
+.................................................sssssssss.............. [ 89%]
+........................................................................ [ 93%]
+.........................ss............................................. [ 96%]
+........................................................................ [ 99%]
+...........                                                              [100%]
+============================== warnings summary ===============================
+giscode\orchestration\types.py:64
+  C:\Users\Gtabyah\Desktop\Projects\GisCode-Core-STAB-01-2026-11-07\clean-checkout\giscode\orchestration\types.py:64: PytestCollectionWarning: cannot collect test class 'TestRequest' because it has a __init__ constructor (from: tests/test_checkpoint_restore_safety.py)
+    @dataclass
+
+giscode\orchestration\types.py:64
+  C:\Users\Gtabyah\Desktop\Projects\GisCode-Core-STAB-01-2026-11-07\clean-checkout\giscode\orchestration\types.py:64: PytestCollectionWarning: cannot collect test class 'TestRequest' because it has a __init__ constructor (from: tests/test_orchestration.py)
+    @dataclass
+
+giscode\orchestration\types.py:73
+  C:\Users\Gtabyah\Desktop\Projects\GisCode-Core-STAB-01-2026-11-07\clean-checkout\giscode\orchestration\types.py:73: PytestCollectionWarning: cannot collect test class 'TestResult' because it has a __init__ constructor (from: tests/test_orchestration.py)
+    @dataclass
+
+giscode\orchestration\types.py:29
+  C:\Users\Gtabyah\Desktop\Projects\GisCode-Core-STAB-01-2026-11-07\clean-checkout\giscode\orchestration\types.py:29: PytestCollectionWarning: cannot collect test class 'TestStatus' because it has a __init__ constructor (from: tests/test_orchestration.py)
+    class TestStatus(Enum):
+
+tests/test_build_launcher.py::test_in_flight_tracking
+  C:\Users\Gtabyah\AppData\Local\Programs\Python\Python313\Lib\threading.py:303: RuntimeWarning: the Tcl interpreter is leaked because it was deallocated in a thread other than the one it was created in (see gh-83274)
+    def __enter__(self):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2203 passed, 40 skipped, 5 warnings in 282.42s (0:04:42)

@@ -102,6 +102,19 @@ def test_installer_recipe_embeds_a_configurable_application():
     assert "upx=True" in spec
 
 
+def test_installer_version_literal_matches_the_package():
+    """The standalone installer cannot import giscode, so its literal must be
+    pinned to the package version by a test rather than left to drift."""
+    import re
+
+    text = (ROOT / "packaging" / "windows_installer" / "giscode_setup.py").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r'^VERSION = "([^"]+)"', text, re.MULTILINE)
+    assert match is not None, "the installer declares no VERSION literal"
+    assert match.group(1) == windows_version.release_version()
+
+
 def test_publisher_identity_matches_the_notice_file():
     notice = (ROOT / "NOTICE").read_text(encoding="utf-8")
     assert windows_version.PUBLISHER in notice

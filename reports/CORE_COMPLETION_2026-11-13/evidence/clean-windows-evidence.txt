@@ -1,0 +1,37 @@
+=== HYPERVISOR CONFIG ===
+      <Firmware type="EFI"/>
+      <TrustedPlatformModule type="v2_0" location=""/>
+=== GUEST TPM ===
+
+-TPM Present: True
+-TPM Version: 2.0
+-TPM Manufacturer ID: IBM
+-TPM Manufacturer Full Name: IBM
+-TPM Manufacturer Version: 8217.4131.22.13878
+-PPI Version: 1.3
+-Is Initialized: True
+-Ready For Storage: True
+-Ready For Attestation: False
+-Information Flags Description:
+	INFORMATION_EK_CERTIFICATE
+-Is Capable For Attestation: False
+-Clear Needed To Recover: False
+-Clear Possible: True
+-TPM Has Vulnerable Firmware: False
+-Bitlocker PCR7 Binding State: Binding Not Possible
+-Maintenance Task Complete: True
+-TPM Spec Version: 1.64
+-TPM Errata Date: Tuesday, March 16, 2021
+-PC Client Version: 0.164
+-Lockout Information: 
+	-Is Locked Out: False
+	-Lockout Counter: 0
+	-Max Auth Fail: 31
+	-Lockout Interval: 600s
+	-Lockout Recovery: 86400s
+=== GUEST OS ===
+CAPTION=Microsoft Windows 11 Enterprise Evaluation
+VERSION=10.0.26300
+BUILD=26300
+ARCH=64-bit
+INSTALL=2026-11-13T08:37:57.0000000-08:00

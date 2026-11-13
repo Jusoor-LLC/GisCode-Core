@@ -379,3 +379,138 @@ def test_uninstall_refuses_when_profile_overlaps_install_dir(env, monkeypatch):
     assert "Refusing to uninstall" in str(excinfo.value)
     assert (env.install / "GisCode.exe").is_file(), "nothing may be deleted"
     assert setup.uninstall_entry_exists()
+
+
+# ---------------------------------------------------------------------------
+# U-3: the application's own ``workspace`` folder, created on first launch
+# ---------------------------------------------------------------------------
+
+def scaffold_workspace(env):
+    """Recreate exactly what the app creates in its working directory.
+
+    ``giscode/workspace/workspace.py`` makes ``workspace/{src,tests,docs,build,logs}``
+    next to the executable when the Start Menu shortcut launches it.
+    """
+    workspace = env.install / "workspace"
+    for name in ("src", "tests", "docs", "build", "logs"):
+        (workspace / name).mkdir(parents=True, exist_ok=True)
+    return workspace
+
+
+def test_uninstall_removes_empty_workspace_scaffold(env):
+    seed_install(env)
+    workspace = scaffold_workspace(env)
+    assert workspace.is_dir()
+
+    result = setup.uninstall()
+
+    assert result["cleanup_complete"] is True
+    assert result["leftover"] == []
+    assert result["user_data_kept"] == []
+    assert not env.install.exists()
+    assert not env.shortcut.exists()
+    assert not setup.uninstall_entry_exists()
+
+
+def test_uninstall_keeps_user_files_in_workspace_and_removes_registration(env):
+    seed_install(env)
+    workspace = scaffold_workspace(env)
+    project = workspace / "src" / "app.py"
+    project.write_text("print('mine')\n", encoding="utf-8")
+
+    result = setup.uninstall()
+
+    assert result["cleanup_complete"] is True
+    assert result["leftover"] == []
+    assert result["user_data_kept"] == [str(workspace)]
+    assert project.read_text(encoding="utf-8") == "print('mine')\n"
+    assert not (env.install / "GisCode.exe").exists()
+    assert not (env.install / "GisCodeSetup.exe").exists()
+    assert not env.shortcut.exists()
+    assert not setup.uninstall_entry_exists()
+
+
+def test_cli_reports_kept_workspace_and_exits_zero(env, capsys):
+    seed_install(env)
+    workspace = scaffold_workspace(env)
+    notes = workspace / "docs" / "notes.md"
+    notes.write_text("keep me\n", encoding="utf-8")
+
+    code = setup.main(["GisCodeSetup.exe", "--uninstall", "--silent"])
+    output = capsys.readouterr().out
+
+    assert code == 0
+    assert f"USER_DATA_KEPT {workspace}" in output
+    assert "CLEANUP COMPLETE" in output
+    assert notes.is_file()
+
+
+def test_locked_program_file_with_workspace_is_incomplete_then_recovers(env):
+    seed_install(env)
+    workspace = scaffold_workspace(env)
+    keep = workspace / "logs" / "session.log"
+    keep.write_text("user log\n", encoding="utf-8")
+
+    with exclusive_handle(env.install / "GisCode.exe"):
+        result = setup.uninstall(delete_retries=4, delete_delay=0.05)
+        assert result["cleanup_complete"] is False
+        assert "GisCode.exe" in result["leftover"]
+        assert setup.uninstall_entry_exists(), "registration must survive a failed uninstall"
+        assert keep.is_file()
+
+    recovered = setup.uninstall(delete_retries=10, delete_delay=0.05)
+    assert recovered["cleanup_complete"] is True
+    assert recovered["leftover"] == []
+    assert keep.is_file()
+    assert not setup.uninstall_entry_exists()
+
+
+def test_reinstall_after_uninstall_preserves_workspace(env, tmp_path, monkeypatch):
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "GisCode.exe").write_bytes(b"app-binary-v1")
+    (payload / "GisCodeSetup.exe").write_bytes(b"setup-binary")
+    monkeypatch.setattr(setup, "payload_dir", lambda: payload)
+
+    setup.install()
+    workspace = scaffold_workspace(env)
+    project = workspace / "src" / "app.py"
+    project.write_text("mine\n", encoding="utf-8")
+
+    setup.uninstall()
+    assert project.is_file()
+
+    again = setup.install()
+    assert Path(again["install_dir"]) == env.install
+    assert (env.install / "GisCode.exe").read_bytes() == b"app-binary-v1"
+    assert env.shortcut.is_file()
+    assert setup.uninstall_entry_exists()
+    assert project.read_text(encoding="utf-8") == "mine\n"
+
+
+def test_deferred_cleanup_keeps_workspace_and_removes_registration(env):
+    seed_install(env)
+    workspace = scaffold_workspace(env)
+    keep = workspace / "docs" / "plan.md"
+    keep.write_text("roadmap\n", encoding="utf-8")
+    log = env.local / "cleanup.log"
+
+    finished = subprocess.Popen([sys.executable, "-c", "pass"])
+    finished.wait(timeout=30)
+
+    script = env.local / "cleanup-user-data.cmd"
+    script.write_text(
+        setup.cleanup_script(finished.pid, env.install / "GisCodeSetup.exe",
+                             env.install, log, f"HKCU\\{env.key}"),
+        encoding="utf-8", newline="",
+    )
+    completed = subprocess.run(["cmd", "/c", str(script)], capture_output=True,
+                               text=True, timeout=120)
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert keep.is_file()
+    assert not (env.install / "GisCode.exe").exists()
+    assert not setup.uninstall_entry_exists()
+    text = log.read_text(encoding="utf-8")
+    assert "DEFERRED_OK user_data_kept" in text
+    assert not script.exists(), "the helper removes itself"
