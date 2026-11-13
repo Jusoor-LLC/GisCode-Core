@@ -18,6 +18,10 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]"
+      - name: collect-order
+        run: |
+          ulimit -n
+          python -m pytest tests --collect-only -q 2>/dev/null | grep -n "test_chatgpt_siwc.py" | head -3
       - name: auth only
         run: xvfb-run -a python -m pytest tests/test_chatgpt_siwc.py -q --tb=short
       - name: prefix-26
