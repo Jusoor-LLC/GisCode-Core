@@ -1,5 +1,7 @@
 name: Debug auth CI
 on:
+  push:
+    branches: [feat/core-onboarding-and-integration]
   workflow_dispatch:
 permissions:
   contents: read
