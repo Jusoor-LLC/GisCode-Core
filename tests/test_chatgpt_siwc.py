@@ -215,12 +215,15 @@ class _Server:
 
             def do_POST(self):  # noqa: N802
                 path = urllib.parse.urlsplit(self.path).path
+                self._diag(f"POST {path}")
                 length = int(self.headers.get("Content-Length") or 0)
                 raw = self.rfile.read(length)
                 if path == "/api/accounts/oauth/token":
+                    self._diag("token body read")
                     fields = dict(urllib.parse.parse_qsl(raw.decode("utf-8")))
                     outer.token_posts.append(fields)
                     self._token(fields)
+                    self._diag("token sent")
                     return
                 if path == "/api/accounts/oauth/revoke":
                     outer.revocations.append(dict(urllib.parse.parse_qsl(raw.decode("utf-8"))))
