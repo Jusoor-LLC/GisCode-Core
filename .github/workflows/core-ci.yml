@@ -44,7 +44,13 @@ jobs:
 
       - name: Test (Linux, headless)
         if: runner.os == 'Linux'
-        run: xvfb-run -a python -m pytest tests --ignore=tests/fixtures -q
+        run: |
+          # The SIWC protocol suite starts a loopback OIDC server per test.
+          # Give it its own process so accumulated threads from unrelated GUI
+          # tests cannot starve a mock-server request thread.
+          xvfb-run -a python -m pytest tests/test_chatgpt_siwc.py -q
+          xvfb-run -a python -m pytest tests --ignore=tests/fixtures \
+            --ignore=tests/test_chatgpt_siwc.py -q
 
       - name: GUI startup check (Windows)
         if: runner.os == 'Windows'
