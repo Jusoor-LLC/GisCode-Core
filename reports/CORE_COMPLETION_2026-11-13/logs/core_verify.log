@@ -1,0 +1,4 @@
+OK GisCode.exe | 31063339 | ef36daa3e030866ea33dc9cc84d516cc473458a2da94f4b21b2de2900b81ebf3 | 0.1.1 | unsigned
+OK GisCodeAcceptanceHardened.exe | 31068468 | c9344d461fc40e46c95310a590b271a37287ab4d9cb64e78d4b652f6130f039e | 0.1.1 | unsigned
+OK GisCodeSetup.exe | 42144846 | c34436f818c9cea2095836217946a106d1669589fa841d9352bf31e5a68bea1c | 0.1.1 | unsigned
+provenance: build\core-completion-2026-11-13\provenance\release-provenance.json (3882392dc12bd61d5aa33a2c9395f8d1a4ed26490d8844733d677344a6d28fcc)

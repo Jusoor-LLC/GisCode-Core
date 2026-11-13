@@ -22,6 +22,10 @@ There are also two **optional remote** routes, each off by default:
 
 A ChatGPT subscription is not API access, and an API key is not plan access.
 
+> **First run?** A new installation offers guided setup that finds Ollama,
+> recommends a model that fits this machine and proves it works with a small
+> coding task. See [`ONBOARDING.md`](ONBOARDING.md).
+
 ---
 
 ## 1. Which route should you use?

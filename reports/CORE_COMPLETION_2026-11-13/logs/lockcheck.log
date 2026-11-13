@@ -1,0 +1,64 @@
+Collecting altgraph==0.17.5 (from -r requirements-lock.txt (line 6))
+  Using cached altgraph-0.17.5-py2.py3-none-any.whl (21 kB)
+Collecting bottle==0.13.4 (from -r requirements-lock.txt (line 8))
+  Using cached bottle-0.13.4-py2.py3-none-any.whl (103 kB)
+Collecting cffi==2.1.1 (from -r requirements-lock.txt (line 10))
+  Using cached cffi-2.1.1-cp313-cp313-win_amd64.whl (185 kB)
+Collecting clr-loader==0.3.1 (from -r requirements-lock.txt (line 12))
+  Using cached clr_loader-0.3.1-py3-none-any.whl (55 kB)
+Collecting packaging==26.3 (from -r requirements-lock.txt (line 14))
+  Using cached packaging-26.3-py3-none-any.whl (129 kB)
+Collecting pefile==2024.8.26 (from -r requirements-lock.txt (line 16))
+  Using cached pefile-2024.8.26-py3-none-any.whl (74 kB)
+Collecting pillow==12.3.0 (from -r requirements-lock.txt (line 18))
+  Using cached pillow-12.3.0-cp313-cp313-win_amd64.whl (7.2 MB)
+Collecting proxy-tools==0.1.0 (from -r requirements-lock.txt (line 20))
+  Using cached proxy_tools-0.1.0.tar.gz (3.0 kB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting psutil==7.2.2 (from -r requirements-lock.txt (line 22))
+  Using cached psutil-7.2.2-cp37-abi3-win_amd64.whl (137 kB)
+Collecting pycparser==3.0 (from -r requirements-lock.txt (line 24))
+  Using cached pycparser-3.0-py3-none-any.whl (48 kB)
+Collecting pyinstaller==6.22.2 (from -r requirements-lock.txt (line 26))
+  Using cached pyinstaller-6.22.2-py3-none-win_amd64.whl (1.4 MB)
+Collecting pyinstaller-hooks-contrib==2026.7 (from -r requirements-lock.txt (line 28))
+  Using cached pyinstaller_hooks_contrib-2026.7-py3-none-any.whl (459 kB)
+Collecting pythonnet==3.1.0 (from -r requirements-lock.txt (line 30))
+  Using cached pythonnet-3.1.0-cp310.cp311.cp312.cp313.cp314-none-win32.win_amd64.whl (1.6 MB)
+Collecting pywebview==6.2.1 (from -r requirements-lock.txt (line 32))
+  Using cached pywebview-6.2.1-py3-none-any.whl (525 kB)
+Collecting pywin32-ctypes==0.2.3 (from -r requirements-lock.txt (line 34))
+  Using cached pywin32_ctypes-0.2.3-py3-none-any.whl (30 kB)
+Collecting pyyaml==6.0.3 (from -r requirements-lock.txt (line 36))
+  Using cached pyyaml-6.0.3-cp313-cp313-win_amd64.whl (154 kB)
+Collecting setuptools==84.0.0 (from -r requirements-lock.txt (line 38))
+  Using cached setuptools-84.0.0-py3-none-any.whl (818 kB)
+Collecting typing-extensions==4.16.0 (from -r requirements-lock.txt (line 40))
+  Using cached typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\altgraph-0.17.5-py2.py3-none-any.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\bottle-0.13.4-py2.py3-none-any.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\cffi-2.1.1-cp313-cp313-win_amd64.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\clr_loader-0.3.1-py3-none-any.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\packaging-26.3-py3-none-any.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\pefile-2024.8.26-py3-none-any.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\pillow-12.3.0-cp313-cp313-win_amd64.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\proxy_tools-0.1.0.tar.gz
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\psutil-7.2.2-cp37-abi3-win_amd64.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\pycparser-3.0-py3-none-any.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\pyinstaller-6.22.2-py3-none-win_amd64.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\pyinstaller_hooks_contrib-2026.7-py3-none-any.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\pythonnet-3.1.0-cp310.cp311.cp312.cp313.cp314-none-win32.win_amd64.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\pywebview-6.2.1-py3-none-any.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\pywin32_ctypes-0.2.3-py3-none-any.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\pyyaml-6.0.3-cp313-cp313-win_amd64.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\setuptools-84.0.0-py3-none-any.whl
+Saved c:\users\gtabyah\appdata\local\temp\lockcheck\typing_extensions-4.16.0-py3-none-any.whl
+Successfully downloaded altgraph bottle cffi clr-loader packaging pefile pillow proxy-tools psutil pycparser pyinstaller pyinstaller-hooks-contrib pythonnet pywebview pywin32-ctypes pyyaml setuptools typing-extensions
+
+[notice] A new release of pip is available: 26.2.1 -> 26.3
+[notice] To update, run: C:\Users\Gtabyah\AppData\Local\Programs\Python\Python313\python.exe -m pip install --upgrade pip

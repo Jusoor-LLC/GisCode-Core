@@ -679,6 +679,13 @@ def run() -> None:
     if "--run-coding-task" in sys.argv:
         _run_coding_task_cli()
         return
+    # First-run setup has a headless path so a clean machine can be qualified
+    # without a desktop: --onboarding-check reports state, --onboarding-run
+    # drives the sequence and exits 0 only after the first coding task passes.
+    if "--onboarding-check" in sys.argv or "--onboarding-run" in sys.argv:
+        from giscode.onboarding.cli import run_cli
+
+        sys.exit(run_cli(sys.argv[1:]))
     settings, workspace, task_manager, inference, model_manager, coding_agent, terminal_executor, sandbox_executor, orchestrator, openhands_adapter, knowledge_service, routing_service, ocr_service, monitoring_service, packaging_builder, signing_service, self_improvement_service, research_service, gisai_engine = bootstrap()
     logger = get_logger("giscode.main")
 
@@ -786,6 +793,15 @@ def run() -> None:
             logger.warning(f"Agent runtime manager unavailable: {runtime_exc}")
             agent_runtime_manager = None
         root = launch_gui(task_manager=task_manager, model_manager=model_manager, coding_agent=coding_agent, terminal_executor=terminal_executor, sandbox_executor=sandbox_executor, orchestrator=orchestrator, openhands_adapter=openhands_adapter, knowledge_service=knowledge_service, routing_service=routing_service, ocr_service=ocr_service, monitoring_service=monitoring_service, packaging_builder=packaging_builder, signing_service=signing_service, self_improvement_service=self_improvement_service, research_service=research_service, gisai_engine=gisai_engine, iosxtool_service=iosxtool_service, agent_registry_service=agent_registry_service, agent_runtime_manager=agent_runtime_manager)
+        # First run: guide the user to a working local model before any autoload.
+        # Additive only - an existing installation is recognised as complete, and
+        # a failure here must never stop the window that is already built.
+        try:
+            from giscode.onboarding import open_wizard_if_needed
+
+            open_wizard_if_needed(root, settings=settings, model_manager=model_manager)
+        except Exception as onboarding_exc:
+            logger.warning(f"Onboarding wizard unavailable: {onboarding_exc}")
         logger.info("Launching GUI")
         # Defer model/server autoload to a background thread so the GUI can
         # appear immediately while llama-server loads the selected model.
