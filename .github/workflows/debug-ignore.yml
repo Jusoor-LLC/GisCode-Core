@@ -1,16 +1,12 @@
-name: Debug ignore onboarding test
+name: Debug deselect onboarding
 on:
   push:
     branches: [feat/core-onboarding-and-integration]
 permissions:
   contents: read
 jobs:
-  one:
+  deselect:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        ignore: [flow, plan, runtime_download, state, task]
     env:
       GISCODE_HOME: ${{ github.workspace }}/.ci-giscode-home
     steps:
@@ -24,4 +20,6 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]"
-      - run: xvfb-run -a python -m pytest tests --ignore=tests/fixtures --ignore=tests/test_onboarding_${{ matrix.ignore }}.py -q
+      - run: |
+          ulimit -u
+          xvfb-run -a python -m pytest tests --ignore=tests/fixtures -k "not onboarding" -q
