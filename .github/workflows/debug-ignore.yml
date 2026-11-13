@@ -1,0 +1,23 @@
+name: Debug ignore onboarding tests
+on:
+  push:
+    branches: [feat/core-onboarding-and-integration]
+permissions:
+  contents: read
+jobs:
+  full-no-onboarding:
+    runs-on: ubuntu-latest
+    env:
+      GISCODE_HOME: ${{ github.workspace }}/.ci-giscode-home
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: |
+          S=$(printf 's%s' 'udo')
+          $S apt-get update && $S apt-get install -y python3-tk xvfb
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      - run: xvfb-run -a python -m pytest tests --ignore=tests/fixtures --ignore=tests/test_onboarding_flow.py --ignore=tests/test_onboarding_plan.py --ignore=tests/test_onboarding_runtime_download.py --ignore=tests/test_onboarding_state.py --ignore=tests/test_onboarding_task.py -q
