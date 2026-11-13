@@ -70,7 +70,7 @@ Qualified Linux result: Ubuntu 24.04, Python 3.13, Tk/Xvfb, `--init`: **2143 pas
 
 ### Hosted CI note (new, 2026-11-13)
 
-The GitHub `ubuntu-latest` label moved to Ubuntu 26.04, and the full suite repeatedly failed one untouched mock-auth test (`test_chatgpt_siwc.py`) with a 20-second loopback timeout. The test module passed alone. The same intermittent timeout later appeared on Ubuntu 24.04 and on Windows, varying which SIWC test failed; server instrumentation showed the mock server was created but a request thread did not always run after the full suite had accumulated unrelated threads. This is a **test-harness scheduling limitation**, not a product failure. CI is pinned to the qualified Ubuntu 24.04 image and now runs the SIWC protocol file in its own pytest process on both platforms; the remaining tests run in a second process. **Every test still runs**; no assertion, timeout or test was removed. Final code head `7f67d97` is green on both runners (runs `43492926349` and `43492732038`).
+The GitHub `ubuntu-latest` label moved to Ubuntu 26.04, and the full suite repeatedly failed one untouched mock-auth test (`test_chatgpt_siwc.py`) with a 20-second loopback timeout. The test module passed alone. The same intermittent timeout later appeared on Ubuntu 24.04 and on Windows, varying which SIWC test failed; server instrumentation showed the mock server was created but a request thread did not always run after the full suite had accumulated unrelated threads. This is a **test-harness scheduling limitation**, not a product failure. CI is pinned to the qualified Ubuntu 24.04 image and now runs the SIWC protocol file in its own pytest process on both platforms; the remaining tests run in a second process. **Every test still runs**; no assertion, timeout or test was removed. Final code head `7f67d97` is green on both runners (runs `43492926349` and `43492732038`); the later report-only head is also green on the push run (`43494209006`).
 
 ## 5. Regression and compatibility totals
 
@@ -116,7 +116,7 @@ Artifacts were built with PyInstaller 6.22.2 from the verified working tree and 
 
 - Repository is **public**, Apache-2.0 detected, created 2026-11-06, default branch `main`.
 - Local/remote branch head: `337e39392df127946edd086d6474c108015c5ebd`.
-- PR **#8** is open, non-draft, `MERGEABLE`, base `main`, head `feat/core-onboarding-and-integration`, 17 commits.
+- PR **#8** is open, non-draft, `MERGEABLE`, base `main`, head `feat/core-onboarding-and-integration`, 22 commits.
 - PR #7 was already merged at `dc45392`; the new work was branched from `origin/main`, not force-pushed over the merged branch.
 - PR #8 contains the substantive qualification commit `8ea4338` plus CI-only diagnostic/cleanup commits. The final tree is clean of diagnostic workflows and diagnostic test code; the PR diff contains only the verified Core changes and the Ubuntu 24.04 CI pin.
 - CI on PR #8: **Ubuntu 24.04 and Windows both passed** on code head `7f67d97` (runs `43492926349` and `43492732038`). The SIWC protocol suite is isolated into its own pytest process on each platform; every test is still run.
