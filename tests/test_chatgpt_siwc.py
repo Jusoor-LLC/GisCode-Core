@@ -427,7 +427,17 @@ class _Server:
         )
 
     def __enter__(self):
-        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        def _serve():
+            with open("/tmp/siwc-server.log", "a", encoding="utf-8") as handle:
+                handle.write(f"{os.getpid()} serve-start {self.httpd.server_address[1]} threads={threading.active_count()}
+")
+            self.httpd.serve_forever()
+
+        thread = threading.Thread(target=_serve, daemon=True)
+        thread.start()
+        with open("/tmp/siwc-server.log", "a", encoding="utf-8") as handle:
+            handle.write(f"{os.getpid()} serve-thread {self.httpd.server_address[1]} ident={thread.ident}
+")
         return self
 
     def __exit__(self, *exc):
