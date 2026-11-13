@@ -40,7 +40,11 @@ jobs:
 
       - name: Test (Windows)
         if: runner.os == 'Windows'
-        run: python -m pytest tests --ignore=tests/fixtures -q
+        run: |
+          # Isolate the SIWC mock-server suite for the same reason as Linux.
+          python -m pytest tests/test_chatgpt_siwc.py -q
+          python -m pytest tests --ignore=tests/fixtures `
+            --ignore=tests/test_chatgpt_siwc.py -q
 
       - name: Test (Linux, headless)
         if: runner.os == 'Linux'
