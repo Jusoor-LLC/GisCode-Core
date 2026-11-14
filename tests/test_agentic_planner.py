@@ -668,3 +668,27 @@ def test_loop_reasoning_budget_defaults_off_without_settings(tmp_path: Path):
     loop = CodingAgentLoop(workspace, api, TaskManager())
     assert loop._reasoning_budget() == "off"
 
+
+
+def test_planner_accepts_structured_verification_step_entries():
+    raw = json.dumps(
+        {
+            "objective": "fix add",
+            "files_expected_to_change": ["maths.py"],
+            "steps": [
+                {
+                    "step_id": "step-1",
+                    "description": "fix add",
+                    "action_type": "modify",
+                    "target_path": "maths.py",
+                    "content": "def add(a, b):\n    return a + b\n",
+                }
+            ],
+            "verification_steps": [
+                {"description": "Run the project tests"},
+                {"check": "The tests pass"},
+            ],
+        }
+    )
+    plan = PlanningOutputParser().parse(raw)
+    assert plan.verification_steps == ["Run the project tests", "The tests pass"]

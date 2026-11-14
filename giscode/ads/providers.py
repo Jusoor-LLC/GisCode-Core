@@ -118,6 +118,30 @@ class AppLovinProvider(_UnavailableProvider):
     _source = "https://legal.applovin.com/policies-publishers/"
 
 
+class MicrosoftAdvertisingProvider(_UnavailableProvider):
+    """Microsoft Advertising is an advertiser platform, not a desktop ad SDK.
+
+    The distinction matters because the names collide. *Microsoft Advertising*
+    (formerly Bing Ads) is where an advertiser buys campaigns, and its API is
+    authenticated with a Microsoft account / Entra ID application. *Entra ID*
+    is only that identity layer; it serves no ads. The *Microsoft Advertising
+    SDK* that did serve ads was UWP-only and its ad-monetization platform was
+    shut down on 1 June 2020; the current Windows in-app ads surface is UWP /
+    Windows App SDK, not a Win32 Python/Tk application.
+    """
+
+    name = "microsoft_advertising"
+    display_name = "Microsoft Advertising"
+    _reason = (
+        "Microsoft Advertising is an advertiser platform (Bing Ads), not a "
+        "publisher ad SDK. Its Windows ad SDK was UWP-only and the ad "
+        "monetization service was shut down on 1 June 2020; this Python/Tk "
+        "Win32 build has no supported integration. Entra ID is only the "
+        "identity provider for the advertiser API, not an ad server."
+    )
+    _source = "https://learn.microsoft.com/en-us/uwp/api/overview/advertising"
+
+
 class HousePromotionProvider:
     """An optional promotion for GisCode Pro, drawn locally.
 
@@ -149,6 +173,7 @@ class HousePromotionProvider:
 PROVIDERS: tuple[AdProvider, ...] = (
     UnityAdsProvider(),
     AppLovinProvider(),
+    MicrosoftAdvertisingProvider(),
     HousePromotionProvider(),
 )
 

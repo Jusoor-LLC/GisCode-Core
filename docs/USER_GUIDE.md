@@ -181,6 +181,24 @@ matters.
 
 ## 5. Choose, load and switch models
 
+### Use the built-in AI Model Selector
+
+1. Open **Model Manager** and find **AI Model Selector**.
+2. Read the recommendation and the hardware line. The recommendation is the
+   smallest model that is both qualified by GisCode and fits this PC.
+3. Select a model to see its size, quantization, memory needs, publisher,
+   source, licence and whether performance is measured or estimated.
+4. Press **Download model**, then **Load / switch model**, then **Test model**.
+   Download progress, cancellation and resume are handled in the panel.
+5. Press **Remove model** to free disk space. GisCode will not remove a model
+   that the other installed edition still uses.
+
+Only the qualified catalogue is recommended automatically. A model marked
+`[not qualified]` can still be selected deliberately, but GisCode will not
+pretend it has passed a real coding test.
+
+### Use a model you supply
+
 1. Open **Model Manager**.
 2. Read the backend note: it reports which `llama-server` GisCode found.
 3. In the header **Model** dropdown, pick a model, or keep `Auto`. The dropdown
@@ -382,7 +400,8 @@ Knowing the limits saves time:
   with `Task failed`. See [section 6](#6-attach-an-image).
 - **No file edits from Chat.** Only Projects changes files, and only with
   approval.
-- **No model downloads.** You supply GGUF files.
+- **The built-in catalogue is curated.** It contains Qwen coder models, not
+  every GGUF on the internet. Manual GGUF files still work.
 - **No Ollama, and no connection to LM Studio's API.** See
   [`LOCAL_AI_SETUP.md`](LOCAL_AI_SETUP.md).
 - **No background service and no auto-update.** The packaged build is installed

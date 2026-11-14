@@ -375,6 +375,8 @@ class _Server:
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.httpd.daemon_threads = True
+        self.httpd.request_queue_size = 128
+        self._serve_ready = threading.Event()
 
     @property
     def base(self) -> str:
@@ -414,7 +416,13 @@ class _Server:
         )
 
     def __enter__(self):
-        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        def _serve():
+            self._serve_ready.set()
+            self.httpd.serve_forever()
+
+        threading.Thread(target=_serve, daemon=True).start()
+        if not self._serve_ready.wait(5.0):
+            raise RuntimeError("the mock OIDC server thread did not start")
         return self
 
     def __exit__(self, *exc):

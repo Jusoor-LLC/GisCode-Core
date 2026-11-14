@@ -83,7 +83,16 @@ def test_non_http_scheme_is_rejected():
 def test_loopback_detection_includes_ip_and_name():
     assert pbase.is_loopback("http://127.0.0.1:1234")
     assert pbase.is_loopback("http://localhost:11434")
+    assert pbase.is_loopback("http://[::1]:11434")
     assert not pbase.is_loopback("http://10.0.0.5:11434")
+
+
+def test_wildcard_bind_is_not_loopback():
+    # 0.0.0.0 means "listen on every interface". Treating it as loopback would
+    # let a wildcard service be accepted as local-only.
+    assert pbase.is_loopback("http://0.0.0.0:11434") is False
+    with pytest.raises(ValueError):
+        pbase.validate_endpoint("http://0.0.0.0:11434")
 
 
 def test_secret_free_endpoint_drops_userinfo():

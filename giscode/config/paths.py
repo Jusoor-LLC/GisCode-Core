@@ -50,11 +50,22 @@ def test_mode() -> bool:
 
 
 def giscode_home() -> Path:
-    """Directory holding profile files (the equivalent of ``~/.giscode``)."""
+    """Directory holding profile files (the equivalent of ``~/.giscode``).
+
+    Core and Pro share model weights deliberately, but they must not share
+    configuration, chats, project state, logs or active-model state.  An
+    explicit ``GISCODE_HOME`` remains an exact override for tests and isolated
+    support runs; the default is edition-scoped so installing one edition can
+    never silently read or modify the other's private files.
+    """
     override = os.environ.get(GISCODE_HOME_ENV, "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    return Path.home() / ".giscode"
+    # Imported lazily: edition.py must stay importable before the profile
+    # layer is initialized, and the environment is the only source of truth.
+    from giscode.edition import edition
+
+    return Path.home() / ".giscode" / edition()
 
 
 def profile_root() -> Path:

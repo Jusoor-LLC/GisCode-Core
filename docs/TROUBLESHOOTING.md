@@ -50,18 +50,24 @@ environment if you suspect a damaged install.
 
 ## The window opens but no model can be loaded
 
-This is usually a server or model-discovery problem, not a GUI failure.
+This is usually a runtime, download or model-discovery problem, not a GUI
+failure.
 
-1. Confirm `llama-server.exe` exists on `PATH`, or that
-   `GISCODE_LLAMA_SERVER_PATH` points to an existing executable.
-2. Put a GGUF model in `%USERPROFILE%\.giscode\models`, or select a model found
-   under LM Studio.
-3. Open **Model Manager** and load the model explicitly.
-4. Read the status line and `giscode.log`; “no model loaded” is an honest
+1. Open **Model Manager → AI Model Selector** and read the status line. The
+   native module downloads its own `llama-server` and catalogue model, so no
+   manual install is normally required.
+2. If a download was interrupted, press **Download model** again. It resumes
+   from the partial file and re-verifies the SHA-256 before loading.
+3. If the recommendation says no qualified model fits, close applications to
+   free memory, check free disk space, or select a smaller model explicitly.
+4. For a manually supplied model, confirm `llama-server.exe` exists on `PATH`,
+   or that `GISCODE_LLAMA_SERVER_PATH` points to an existing executable, and put
+   the GGUF in `%USERPROFILE%\.giscode\models` or a folder GisCode scans.
+5. Read the status line and `giscode.log`; “no model loaded” is an honest
    refusal, not a hidden fallback.
 
-GisCode does not download models or install `llama-server` for you. A missing
-model must not be reported as a successful run.
+A missing model or failed integrity check is never reported as a successful
+run. A model that has not passed qualification is never selected silently.
 
 ## The server is already running
 

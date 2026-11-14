@@ -5307,6 +5307,25 @@ class MainWindow(QueueHost):
                 justify=tk.LEFT,
             ).pack(anchor=tk.W, pady=(8, 0))
 
+        # The native, one-action AI module. Kept in its own module so a problem
+        # in this section cannot take the existing GGUF/provider controls down.
+        try:
+            from giscode.gui.ai_module_panel import build_ai_module_panel
+
+            self._ai_module_panel = build_ai_module_panel(frame, self)
+        except Exception as _ai_module_exc:  # pragma: no cover - defensive
+            self._ai_module_panel = None
+            ttk.Label(
+                frame,
+                text=(
+                    "Native AI module unavailable: "
+                    f"{type(_ai_module_exc).__name__}: {_ai_module_exc}"
+                ),
+                foreground="red",
+                wraplength=900,
+                justify=tk.LEFT,
+            ).pack(anchor=tk.W, pady=(8, 0))
+
     def _create_project_doctor_tab(self) -> None:
         # Pro-only: the builder lives in giscode.gui.pro_tabs, which the
         # Core export does not ship. Importing it here is the module

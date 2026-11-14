@@ -97,12 +97,18 @@ Two steps are easy to confuse:
 
 | Step | What it means | Who does it |
 | --- | --- | --- |
-| **Installing a model** | Putting a `.gguf` file on disk — a download you perform | You |
-| **Connecting it to GisCode** | GisCode discovering that file, starting its own `llama-server`, loading the file and answering a prompt | GisCode, using the server binary and model folder you supply |
+| **Installing a model** | Downloading a verified `.gguf` file to disk | You, or the native **AI Model Selector** |
+| **Connecting it to GisCode** | Starting GisCode's own `llama-server` and loading the model | GisCode |
 
-Downloading a model does not connect it. The file must sit in a folder GisCode
-scans (`~/.giscode/models`, `~/.lmstudio/models`,
-`C:\Users\Public\lmstudio\models`, or the `paths.models_dir` setting) and a
+The easiest route is **Model Manager → AI Model Selector**: GisCode recommends a
+qualified model for this PC, downloads its own pinned `llama-server` and the
+model, verifies both SHA-256 hashes, loads it and runs a real coding test. No
+terminal, Ollama or manual file placement is required. Downloads can be
+cancelled and resumed.
+
+You can still supply a GGUF manually. It must sit in a folder GisCode scans
+(`~/.giscode/models`, `~/.lmstudio/models`,
+`C:\Users\Public\lmstudio\models`, or the `paths.models_dir` setting), and a
 `llama-server` binary must be available.
 
 GisCode runs a GGUF file in its own `llama-server` **or** uses another local

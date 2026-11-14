@@ -1,3 +1,4 @@
+import atexit
 import json
 import logging
 import math
@@ -105,6 +106,25 @@ LLAMA_COMPLETION_PROBE_MAX_TOKENS = 1
 logger = logging.getLogger(__name__)
 
 _OWNED_SERVER_PIDS: set[int] = set()
+
+
+def _terminate_owned_servers() -> None:
+    """Kill only llama-server processes started by this Python process.
+
+    ``stop_server`` covers a normal unload, but a scripting session, a failed
+    startup path or a normal interpreter exit can otherwise orphan the child.
+    On Windows the child outlives its parent and keeps its model resident, so
+    the next GisCode start sees much less free RAM and can refuse to load the
+    very model it just downloaded.
+    """
+    for pid in list(_OWNED_SERVER_PIDS):
+        try:
+            _kill_process_tree(pid)
+        finally:
+            _OWNED_SERVER_PIDS.discard(pid)
+
+
+atexit.register(_terminate_owned_servers)
 
 #: Resolved once per session; see ``_resolve_backend_choice``.
 _LAST_BACKEND_CHOICE: Optional["backend_selection.BackendChoice"] = None
@@ -428,6 +448,10 @@ class ChatRequest:
     # "off" | "low" | "default" - mirrors llama-server's --reasoning /
     # --reasoning-budget options; None sends no override.
     reasoning_budget: Optional[str] = None
+    # Optional JSON schema for structured output.  GISAI's correction planner
+    # already passes this; ChatRequest must carry it to llama-server's
+    # response_format instead of rejecting the request at construction time.
+    response_schema: Optional[dict] = None
 
     def to_payload(self) -> dict:
         payload: dict = {
@@ -437,6 +461,15 @@ class ChatRequest:
             "stream": False,
             "stop": list(self.stop) if self.stop else [],
         }
+        if self.response_schema:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "giscode_response",
+                    "strict": True,
+                    "schema": self.response_schema,
+                },
+            }
         if self.reasoning_budget:
             if self.reasoning_budget == "off":
                 # `"reasoning": "off"` alone proved ineffective for Qwen3 (the

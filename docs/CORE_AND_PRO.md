@@ -137,3 +137,27 @@ Whether the public repository publishes Pro implementations at all (Core only,
 a compiled Pro build, or the full source) is still the owner's decision; the
 mechanism above makes the Core-only choice a one-flag run rather than a manual
 edit.
+
+## Windows distribution of Pro (decided 2026-11-11)
+
+The owner has approved Windows distribution of GisCode Pro as a product goal.
+The decision fixes these points:
+
+- **A separate, Pro-branded installer**, not the Core installer with a switched
+  label: `GisCodePro.exe` inside a Pro-branded setup with its own product name,
+  version-resource identity, Start Menu shortcut and uninstall registry key.
+- **Pro packaging lives in the private Pro repository.** This public Core tree
+  stays Core-only; nothing here creates, brands or ships a Pro installer.
+- **Installer logic is shared where practical.** The per-user install/uninstall
+  behaviour proven for Core (empty-folder pruning, user-data preservation,
+  registration removal only when no program files remain, truthful incomplete
+  reporting, deferred cleanup) is the behaviour Pro must exhibit; Pro carries
+  the same logic under its own brand rather than a re-implementation.
+- **Core and Pro stay independent.** Core never imports or depends on Pro, and
+  the Pro build never depends on Core's branding, registry key or artifact
+  names.
+
+This records product direction only. It authorises no installer implementation,
+build, signing, publication or deployment; each of those needs its own approval.
+The implementation plan and its prerequisites are tracked in
+`reports/PRO_INSTALLER_DECISION_2026-11-11/`.

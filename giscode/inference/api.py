@@ -196,6 +196,27 @@ class InferenceAPI:
         """Why the runtime is a degraded choice ('' for a healthy selection)."""
         return self._runtime_note
 
+    def set_runtime(self, runtime: LlamaCppRuntime) -> None:
+        """Replace the process runtime after a managed AI module is installed.
+
+        The old server, if any, is stopped before the new one becomes visible so
+        a loaded model is never silently associated with the wrong executable.
+        Callers that hold a ``ModelManager`` keep it: only the runtime object
+        changes, and the next ``load_model`` uses the new engine.
+        """
+        with self._lock:
+            previous = self._runtime
+            if previous is not runtime:
+                try:
+                    previous.stop_server()
+                except Exception:
+                    _get_logger_for_inference().debug(
+                        "Old inference runtime did not stop cleanly", exc_info=True
+                    )
+            self._runtime = runtime
+            self._model = None
+            self._runtime_note = ""
+
     def _probe_runtime_liveness(self) -> bool:
         """Authoritative runtime liveness probe. Never trusts cached model state.
 

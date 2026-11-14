@@ -8,14 +8,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from giscode.config.paths import giscode_home, profile_root, set_giscode_home
+from giscode.edition import edition
 from giscode.knowledge.config import KnowledgeStoreConfig
 
 
 def test_giscode_home_default():
-    """With GISCODE_HOME unset, giscode_home() equals Path.home()/.giscode."""
+    """With GISCODE_HOME unset, giscode_home() is edition-scoped."""
     if "GISCODE_HOME" in os.environ:
         del os.environ["GISCODE_HOME"]
-    expected = Path.home() / ".giscode"
+    expected = Path.home() / ".giscode" / edition()
     assert giscode_home() == expected, f"Expected {expected}, got {giscode_home()}"
     print("OK test_giscode_home_default")
 
@@ -34,10 +35,11 @@ def test_giscode_home_override():
 
 
 def test_profile_root_default():
-    """With GISCODE_HOME unset, profile_root() equals Path.home()."""
+    """With GISCODE_HOME unset, profile_root() contains the edition profile."""
     if "GISCODE_HOME" in os.environ:
         del os.environ["GISCODE_HOME"]
-    assert profile_root() == Path.home(), f"Expected {Path.home()}, got {profile_root()}"
+    expected = Path.home() / ".giscode"
+    assert profile_root() == expected, f"Expected {expected}, got {profile_root()}"
     print("OK test_profile_root_default")
 
 
@@ -56,11 +58,11 @@ def test_profile_root_override():
 
 
 def test_knowledge_config_default_path():
-    """With GISCODE_HOME unset, knowledge.db resolves to ~/.giscode/knowledge.db."""
+    """With GISCODE_HOME unset, knowledge.db is edition-scoped."""
     if "GISCODE_HOME" in os.environ:
         del os.environ["GISCODE_HOME"]
     config = KnowledgeStoreConfig()
-    expected = Path.home() / ".giscode" / "knowledge.db"
+    expected = Path.home() / ".giscode" / edition() / "knowledge.db"
     assert config.storage_path == expected, f"Expected {expected}, got {config.storage_path}"
     print("OK test_knowledge_config_default_path")
 

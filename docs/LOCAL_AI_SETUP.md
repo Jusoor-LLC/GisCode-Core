@@ -1,11 +1,14 @@
 # Connecting a local AI model to GisCode Core
 
-GisCode Core runs models on your own machine. There are two ways to do that, and
-this guide covers both:
+GisCode Core runs models on your own machine. There are three ways to do that:
 
-1. **GisCode's own runtime.** You give it a **GGUF** file and a `llama-server`
-   binary; GisCode starts the server itself. This is the default.
-2. **Another local server.** Ollama, LM Studio's local server, or any
+1. **The native AI module (recommended).** Open **Model Manager → AI Model
+   Selector**. GisCode checks your hardware, recommends a qualified coding
+   model, downloads its own `llama-server` and the model, verifies both
+   SHA-256 hashes, loads the model, and tests it with a real coding prompt.
+2. **GisCode's own runtime with a model you supply.** You give it a **GGUF**
+   file and a `llama-server` binary; GisCode starts the server itself.
+3. **Another local server.** Ollama, LM Studio's local server, or any
    OpenAI-compatible endpoint, selected in **Model Manager → Local providers**.
 
 Both are local. Neither needs an account, and neither sends your project
@@ -21,6 +24,10 @@ There are also two **optional remote** routes, each off by default:
   [`OPENAI_DIRECT.md`](OPENAI_DIRECT.md).
 
 A ChatGPT subscription is not API access, and an API key is not plan access.
+
+> **First run?** A new installation offers guided setup that finds Ollama,
+> recommends a model that fits this machine and proves it works with a small
+> coding task. See [`ONBOARDING.md`](ONBOARDING.md).
 
 ---
 
@@ -38,9 +45,30 @@ want for coding, reasoning, chat or vision.
 
 ---
 
-## 2. GisCode's own runtime (GGUF + `llama-server`)
+## 2. GisCode's own runtime (native module, or GGUF + `llama-server`)
 
-### Where the model must be
+### The built-in AI Model Selector
+
+1. Open **Model Manager** and find **AI Model Selector**.
+2. Read the hardware line and the recommendation. Only models that passed
+   GisCode's real-inference qualification are recommended automatically.
+3. Select a model to see its download size, memory requirement, publisher,
+   source, licence, revision and expected performance. Expected performance is
+   an estimate unless it is explicitly labelled as measured.
+4. Press **Download model**. The download can be cancelled and resumes from the
+   partial file when you press Download again. GisCode verifies the exact
+   SHA-256 from its pinned catalogue; a mismatch is deleted, never loaded.
+5. Press **Load / switch model**. On first use GisCode also downloads its own
+   pinned `llama.cpp` runtime for the detected backend (CUDA, Vulkan or CPU).
+6. Press **Test model** to run real inference and a coding-correctness check.
+7. Use **Remove model** to delete a downloaded model. The runtime stays in
+   place. Removal is refused if the other installed GisCode edition still uses
+   that model.
+
+No terminal command, environment variable or separate AI application is
+required. Inference listens on `127.0.0.1` only.
+
+### Where a manually supplied model must be
 
 GisCode discovers `.gguf` files in:
 

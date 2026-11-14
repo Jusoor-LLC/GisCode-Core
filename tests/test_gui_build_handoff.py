@@ -167,7 +167,10 @@ class _RecordingCodingAgent:
 def test_approval_hands_the_approved_plan_to_the_launcher(
     project_store, chat_store, tmp_path
 ):
-    agent = _RecordingCodingAgent()
+    # Block the fake build until this test releases it in ``finally``: the
+    # launcher advances BUILDING -> TESTING -> VERIFICATION as soon as the agent
+    # returns, so an unblocked fake races the assertion below.
+    agent = _RecordingCodingAgent(block=True)
     controller = ProjectWorkspaceController(
         project_store, chat_store, coding_agent=agent
     )

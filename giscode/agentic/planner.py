@@ -448,6 +448,27 @@ class PlanningOutputParser:
             )
         out: List[str] = []
         for item in value:
+            # Small coding models commonly emit a verification step as
+            # ``{"description": "..."}`` even though the schema asks for a
+            # string.  A verification step is planning metadata, never an
+            # executable action, so flatten the common text fields instead of
+            # discarding an otherwise usable plan.
+            if isinstance(item, dict):
+                item = next(
+                    (
+                        item.get(field)
+                        for field in (
+                            "description",
+                            "step",
+                            "check",
+                            "action",
+                            "name",
+                            "text",
+                        )
+                        if isinstance(item.get(field), str) and item.get(field).strip()
+                    ),
+                    None,
+                )
             if not isinstance(item, str):
                 raise PlanningError(
                     f"planner '{key}' entries must be strings "
@@ -467,6 +488,45 @@ class PlanningOutputParser:
 # clamped so a configuration mistake cannot ask for an unbounded completion.
 DEFAULT_PLAN_MAX_TOKENS = 4096
 MAX_PLAN_MAX_TOKENS = 16384
+
+#: Constrain the model's output to the plan shape.  A small coder model will
+#: otherwise answer a request conversationally ("Sure, provide the files..."),
+#: which the parser correctly rejects but wastes the task.  The runtime maps
+#: this to llama-server's JSON-schema response_format.
+_PLANNER_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "objective": {"type": "string"},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "files_expected_to_change": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "steps": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "step_id": {"type": "string"},
+                    "description": {"type": "string"},
+                    "action_type": {
+                        "type": "string",
+                        "enum": ["create", "modify", "read"],
+                    },
+                    "target_path": {"type": "string"},
+                    "content": {"type": "string"},
+                    "expected_result": {"type": "string"},
+                },
+                "required": ["description", "action_type", "target_path"],
+            },
+        },
+        "verification_steps": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    },
+    "required": ["objective", "steps"],
+}
 
 
 def _clamp_max_tokens(value: Any) -> int:
@@ -663,6 +723,165 @@ def _planned_source(
         return local.read_text(encoding="utf-8", errors="replace"), local
     except OSError:
         return None, local
+
+
+def _validate_plan_file_modes(plan: ExecutionPlan, workspace_root: Any) -> None:
+    """Reject a plan whose action contradicts the file's presence.
+
+    Small models often say ``create`` for a file they were asked to change.
+    The guarded writer then refuses (correctly), but the loop used to abort the
+    whole task without giving the model the one correction it needed. Catch it
+    at planning time and make the retry prompt carry the exact remedy.
+    """
+    try:
+        root = Path(workspace_root).resolve()
+    except (OSError, TypeError, ValueError):
+        return
+    for index, step in enumerate(plan.steps):
+        action = getattr(step.action_type, "value", step.action_type)
+        target = str(step.target_path or "").strip()
+        if action not in ("create", "modify") or not target:
+            continue
+        try:
+            path = (root / target).resolve()
+        except (OSError, ValueError):
+            continue
+        if action == "create" and path.exists():
+            # Never turn a model's "create" into an unchecked overwrite.  Use
+            # modify so the preservation checks inspect the real file.
+            step.action_type = ActionType.MODIFY
+            continue
+        if action == "modify" and not path.exists():
+            raise PlanningError(
+                f"step[{index}] uses modify for {target!r}, but that file does "
+                "not exist. Use action_type \"create\" with the complete new "
+                "file content instead.",
+                retryable=True,
+            )
+
+
+def _repair_missing_definitions(
+    plan: ExecutionPlan, workspace_root: Any, request_text: str
+) -> None:
+    """Reinsert exact existing definitions a whole-file rewrite omitted.
+
+    This is deliberately narrow: it only restores top-level functions/classes
+    that were present before the plan and are absent from the proposed text,
+    and only when the user did not name that symbol for removal/rename.  The
+    original source segment is reused verbatim, so no model-authored guess is
+    introduced.  Validation still runs afterwards and rejects any result that
+    cannot be made syntactically sound.
+    """
+    try:
+        root = Path(workspace_root).resolve()
+    except (OSError, TypeError, ValueError):
+        return
+    text = str(request_text or "").lower()
+    for step in plan.steps:
+        action = getattr(step.action_type, "value", step.action_type)
+        target = str(step.target_path or "").strip()
+        if action != "modify" or not target or not target.lower().endswith(".py"):
+            continue
+        if not isinstance(step.content, str):
+            continue
+        try:
+            path = (root / target).resolve()
+            old_source = path.read_text(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            continue
+        try:
+            old_tree = ast.parse(old_source)
+            new_tree = ast.parse(step.content)
+        except SyntaxError:
+            continue
+        old_defs = {
+            node.name: node
+            for node in old_tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        }
+        new_names = {
+            node.name
+            for node in new_tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        }
+        missing = [name for name in old_defs if name not in new_names]
+        if not missing:
+            continue
+        add_back: list[str] = []
+        for name in missing:
+            explicitly_removed = any(
+                f"{verb} {name}" in text
+                for verb in ("remove", "delete", "rename", "drop")
+            )
+            segment = ast.get_source_segment(old_source, old_defs[name])
+            if not explicitly_removed and segment:
+                add_back.append(segment.rstrip())
+        if add_back:
+            step.content = (
+                step.content.rstrip()
+                + "\n\n\n"
+                + "\n\n\n".join(add_back)
+                + "\n"
+            )
+
+
+def _validate_preserved_symbols(
+    plan: ExecutionPlan, workspace_root: Any, request_text: str
+) -> None:
+    """Reject a modify that silently drops existing top-level definitions.
+
+    The planner asks for complete file content, but a small model can return
+    only the new function and erase everything else. Tests for the new
+    behaviour then pass while unrelated user code has been destroyed. Only
+    definitions named in an explicit removal/rename request may disappear.
+    """
+    try:
+        root = Path(workspace_root).resolve()
+    except (OSError, TypeError, ValueError):
+        return
+    text = str(request_text or "").lower()
+    for index, step in enumerate(plan.steps):
+        action = getattr(step.action_type, "value", step.action_type)
+        target = str(step.target_path or "").strip()
+        if action != "modify" or not target or not target.lower().endswith(".py"):
+            continue
+        if not isinstance(step.content, str):
+            continue
+        try:
+            path = (root / target).resolve()
+            old_source = path.read_text(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            continue
+        try:
+            old_tree = ast.parse(old_source)
+            new_tree = ast.parse(step.content)
+        except SyntaxError:
+            continue
+        old_names = {
+            node.name
+            for node in old_tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        }
+        new_names = {
+            node.name
+            for node in new_tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        }
+        missing = sorted(old_names - new_names)
+        # ``missing`` may be removed only when the user named that exact
+        # symbol after a removal verb ("remove add"); "without removing add"
+        # and "do not remove add" must not count as permission.
+        explicitly_removed = all(
+            any(f"{verb} {name}" in text for verb in ("remove", "delete", "rename", "drop"))
+            for name in missing
+        )
+        if missing and not explicitly_removed:
+            raise PlanningError(
+                f"step[{index}] rewrites {target!r} without preserving existing "
+                f"top-level definitions: {', '.join(missing)}. Include them "
+                "unchanged in the complete file content; do not delete unrelated code.",
+                retryable=True,
+            )
 
 
 def _validate_plan_python(plan: ExecutionPlan, workspace_root: Any) -> None:
@@ -907,7 +1126,7 @@ class Planner:
         *,
         workspace_root: Optional[Any] = None,
         max_tokens: int = DEFAULT_PLAN_MAX_TOKENS,
-        temperature: float = 0.2,
+        temperature: float = 0.0,
         max_steps: int = 64,
         reasoning_budget_fn: Optional[Callable[[], str]] = None,
     ) -> None:
@@ -976,6 +1195,7 @@ class Planner:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             reasoning_budget=self._reasoning_budget(),
+            response_schema=_PLANNER_RESPONSE_SCHEMA,
         )
         try:
             # Pass the stop signal through when the inference surface accepts
@@ -1012,6 +1232,9 @@ class Planner:
         try:
             plan = parser.parse(text)
             if self._workspace_root is not None:
+                _validate_plan_file_modes(plan, self._workspace_root)
+                _repair_missing_definitions(plan, self._workspace_root, request.description)
+                _validate_preserved_symbols(plan, self._workspace_root, request.description)
                 _validate_planned_contract(
                     plan, self._workspace_root, request.description
                 )

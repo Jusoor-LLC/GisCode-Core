@@ -236,6 +236,20 @@ class OllamaProvider(Provider):
                         usage["prompt_tokens"] = prompt_tokens
                     if isinstance(completion_tokens, int):
                         usage["completion_tokens"] = completion_tokens
+                    # Ollama reports its own nanosecond timings. Keeping the
+                    # generation duration separate from wall time matters for
+                    # models that think before emitting visible content: wall
+                    # time would otherwise credit all tokens to the tiny gap
+                    # after the first visible delta.
+                    for key in (
+                        "total_duration",
+                        "load_duration",
+                        "prompt_eval_duration",
+                        "eval_duration",
+                    ):
+                        value = obj.get(key)
+                        if isinstance(value, int):
+                            usage[f"{key}_ns"] = value
                     yield StreamDelta(
                         done=True,
                         finish_reason=str(obj.get("done_reason") or "stop"),

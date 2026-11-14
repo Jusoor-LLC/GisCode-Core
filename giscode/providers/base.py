@@ -48,7 +48,7 @@ DEFAULT_ENDPOINTS = {
     CHATGPT: "https://api.openai.com",
 }
 
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class ProviderError(RuntimeError):
